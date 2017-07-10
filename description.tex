@@ -1,0 +1,80 @@
+% !TEX encoding = UTF-8 Unicode
+%\documentclass[12pt,reqno]{amsart}
+\documentclass{article}
+%\usepackage{tocloft}
+
+%\cftsetindents{section}{0.5in}{0.5in}
+%\cftsetindents{subsection}{0.5in}{0.5in}
+\usepackage[russian]{babel}
+\usepackage[utf8]{inputenc}
+%\usepackage[dvips]{graphicx,graphics}
+\usepackage{graphicx}
+\usepackage{euscript}
+\usepackage{graphics}
+%\usepackage{russcorr}
+\usepackage[active]{srcltx} % SRC Specials: DVI [Inverse] Search
+\usepackage{amssymb,amsmath,amsthm,amsfonts}
+\usepackage{amsopn}
+\newtheorem{cor}{Следствие}
+\newtheorem{lem}{Лемма}
+\newtheorem{thm}{Теорема}
+\newtheorem{prop}{Предложение}
+\newtheorem*{thm_pres}{Теорема}
+\theoremstyle{definition}
+\newtheorem{defn}{Определение}
+\newtheorem{defneq}{Эквивалентное определение}
+\theoremstyle{remark}
+\newtheorem*{rem}{Замечание}
+\newtheorem*{deff}{Обозначение}
+
+\usepackage{verbatim}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks,
+    citecolor=black,
+    filecolor=black,
+    linkcolor=blue,
+    urlcolor=blue
+}
+\setcounter{secnumdepth}{0}
+
+\newcommand{\sug}[1]{\rule[-2mm]{0.4pt}{5mm}_{\,{#1}}}
+\newcommand{\gen} {$GE^+_n(\mathbf{R}[x])\ $}
+\newcommand{\genn} {$GE^+_2(\mathbf{R}[x])\ $}
+\newcommand{\gn} {$G_n(\mathbf{R})\ $}
+\newcommand{\gln} {$GL_n(\mathbf{R}[x])\ $}
+\newcommand{\p} {\mathbf{P}}
+\newcommand{\peq} {$\mathcal{P}$}
+\newcommand{\po} {$\mathcal{P}_0$}
+\newcommand{\ff} {$\mathbf{R}\ $}
+\newcommand{\fx} {\mathbf{R}[x]}
+\newcommand{\fp} {\mathbf{R_+}}
+\newcommand{\fxp} {\mathbf{R_+}[x]}
+\newcommand{\zx} {\mathbb{Z}[x]}
+\newcommand{\zxp} {\mathbb{Z_+}[x]}
+\newcommand{\basering} {$\mathbf{F}$}
+\newcommand{\lfrac} [2] {\displaystyle \frac{#1}{#2}}
+\newcommand{\brsum} [3] {\displaystyle \sum \limits_{#1}^{#2} \left( #3\right)}
+\newcommand{\lsum} [2] {\displaystyle \sum \limits_{#1}^{#2}}
+\newcommand{\br} [1] {\left( #1 \right)}
+\newcommand{\tab} {\mbox{             } \quad }
+\usepackage{a4wide}
+
+\begin{document}
+
+\begin{center}
+ \Large{\bf RAST: highly distributed DB proejct.}
+
+{\large {\bf Produced by NOA team}}
+\end{center}
+
+\tableofcontents
+
+\newpage
+
+\section{Micro-Architecture (classes and methods)}
+
+\subsection{1. Lock-free queue} $\\$
+
+\end{document}
+
