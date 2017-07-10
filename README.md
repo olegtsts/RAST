@@ -1,1 +1,3 @@
-Yet no description
+This project represents a highly distributed DB.
+
+Check out for the detailed description here http://rawgit.com/olegtsts/RAST/master/description.pdf
