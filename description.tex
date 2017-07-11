@@ -7,6 +7,10 @@
 %\cftsetindents{subsection}{0.5in}{0.5in}
 \usepackage[utf8]{inputenc}
 %\usepackage[dvips]{graphicx,graphics}
+\usepackage{listings}
+\usepackage{xcolor}
+\definecolor{dkgreen}{rgb}{0,0.6,0}
+\definecolor{gray}{rgb}{0.4,0.4,0.4}
 \usepackage{graphicx}
 \usepackage{euscript}
 \usepackage{graphics}
@@ -14,17 +18,6 @@
 \usepackage[active]{srcltx} % SRC Specials: DVI [Inverse] Search
 \usepackage{amssymb,amsmath,amsthm,amsfonts}
 \usepackage{amsopn}
-\newtheorem{cor}{Следствие}
-\newtheorem{lem}{Лемма}
-\newtheorem{thm}{Теорема}
-\newtheorem{prop}{Предложение}
-\newtheorem*{thm_pres}{Теорема}
-\theoremstyle{definition}
-\newtheorem{defn}{Определение}
-\newtheorem{defneq}{Эквивалентное определение}
-\theoremstyle{remark}
-\newtheorem*{rem}{Замечание}
-\newtheorem*{deff}{Обозначение}
 
 \usepackage{verbatim}
 \usepackage{hyperref}
@@ -35,30 +28,25 @@
     linkcolor=blue,
     urlcolor=blue
 }
-\setcounter{secnumdepth}{0}
+\usepackage{titlesec}
+\titleformat{\section}[block]{\color{blue}\Large\bfseries\filcenter}{\thesection.}{1em}{}
+\titleformat{\subsection}[hang]{\color{blue}\large\filcenter}{\thesubsection.}{1em}{}
 
-\newcommand{\sug}[1]{\rule[-2mm]{0.4pt}{5mm}_{\,{#1}}}
-\newcommand{\gen} {$GE^+_n(\mathbf{R}[x])\ $}
-\newcommand{\genn} {$GE^+_2(\mathbf{R}[x])\ $}
-\newcommand{\gn} {$G_n(\mathbf{R})\ $}
-\newcommand{\gln} {$GL_n(\mathbf{R}[x])\ $}
-\newcommand{\p} {\mathbf{P}}
-\newcommand{\peq} {$\mathcal{P}$}
-\newcommand{\po} {$\mathcal{P}_0$}
-\newcommand{\ff} {$\mathbf{R}\ $}
-\newcommand{\fx} {\mathbf{R}[x]}
-\newcommand{\fp} {\mathbf{R_+}}
-\newcommand{\fxp} {\mathbf{R_+}[x]}
-\newcommand{\zx} {\mathbb{Z}[x]}
-\newcommand{\zxp} {\mathbb{Z_+}[x]}
-\newcommand{\basering} {$\mathbf{F}$}
-\newcommand{\lfrac} [2] {\displaystyle \frac{#1}{#2}}
-\newcommand{\brsum} [3] {\displaystyle \sum \limits_{#1}^{#2} \left( #3\right)}
-\newcommand{\lsum} [2] {\displaystyle \sum \limits_{#1}^{#2}}
-\newcommand{\br} [1] {\left( #1 \right)}
-\newcommand{\tab} {\mbox{             } \quad }
 \usepackage{a4wide}
-
+\lstset{language=C++,
+                basicstyle=\ttfamily,
+		frame=tb,
+		  aboveskip=3mm,
+		  belowskip=3mm,
+		  numberstyle=\tiny\color{gray},
+		  keywordstyle=\color{blue},
+		  commentstyle=\color{dkgreen},
+		  stringstyle=\color{mauve},
+		  breaklines=true,
+		  breakatwhitespace=true,
+		  tabsize=3,
+                morecomment=[l][\color{magenta}]{\#}
+}
 \begin{document}
 
 \begin{center}
@@ -73,7 +61,25 @@
 
 \section{Micro-Architecture (classes and methods)}
 
-\subsection{1. Lock-free queue} $\\$
+\subsection{Lock-free queue} $\\$
+
+$LockFreeQueue<TElement>$ is obviously an implementation of lock-free queue. It contains the following functions:
+
+
+\begin{lstlisting}
+LockFreeQueue<TElement> {
+	void Push(TElement new_element);
+	// Exceptions:
+	// 	Strong exception safety: in case of failure
+	// 	the element is not pushed to the queue,
+	// 	there are no visible side effects
+
+	std::unqiue_ptr<TElement> Pop() noexcept;
+	// Return value:
+	// 	nullptr unique_ptr if the queue was empty,
+	// 	unique_ptr pointing on TElement in case of successfull pop
+};
+\end{lstlisting}
 
 \end{document}
 
