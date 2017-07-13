@@ -121,9 +121,13 @@ $\bullet$ if the corresponding $N$-th list of blocks is empty, we allocate sever
 
 $\bullet$ detach first block from the list
 
-$\bullet$ mark the block as not owned by allocator
+$\bullet$ split the block into two blocks: first block has exactly needed size, second block consists of what is remained
 
-$\bullet$ return a pointer to the Data section of the block to a consumer
+$\bullet$ attach second block to its corresponding list
+
+$\bullet$ mark the first block as not owned by allocator
+
+$\bullet$ return a pointer to the Data section of the first block to a consumer
 
 \smallskip
 
@@ -131,7 +135,7 @@ The deallocation procedure:
 
 $\bullet$ receive from a consumer a pointer to deallocate data
 
-$\bullet$ calculate the pointer to FrontControl (by subtracting $sizeof(FrontControl)$ from Data pointer.
+$\bullet$ calculate the pointer to FrontControl (by subtracting $sizeof(FrontControl)$ from Data pointer)
 
 $\bullet$ mark block as owned by the allocator
 
@@ -151,10 +155,7 @@ $\bullet$ check if the forthcoming block is owned by allocator using its FrontCo
 
 \newpage
 
-\section{Detailed Architecture (classes and methods)}
-\subsection{BulkAllocator}
-
-BulkAllocator is an allocator, which for each required type size stores a list of
+\section{Detailed Code Architecture (classes and methods)}
 
 \subsection{Lock-free queue}
 
