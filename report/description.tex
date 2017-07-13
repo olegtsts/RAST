@@ -58,10 +58,17 @@
 \tableofcontents
 
 \newpage
+\section{Algorithmic basis}
 
-\section{Micro-Architecture (classes and methods)}
+\subsection{Allocator}
 
-\subsection{Lock-free queue} $\\$
+
+\section{Detailed Architecture (classes and methods)}
+\subsection{BulkAllocator}
+
+BulkAllocator is an allocator, which for each required type size stores a list of
+
+\subsection{Lock-free queue}
 
 $LockFreeQueue<TElement>$ is obviously an implementation of lock-free queue. It contains the following functions:
 
