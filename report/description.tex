@@ -61,6 +61,7 @@
 \section{Algorithmic basis}
 
 \subsection{Free-list multi-level allocator}
+\label{free_list_algo}
 
 On of the most important steps in order to make a low-latency system is to consider the allocation problem. The problem is that sometimes different components of the program require very small parts of memory to be allocated. Asking the system to allocate memory directly can result in slower performance. That's why it is better to allocate large memory segment and distribute its parts among several consumers.
 
@@ -157,13 +158,74 @@ $\bullet$ check if the forthcoming block is owned by allocator using its FrontCo
 
 \section{Detailed Code Architecture (classes and methods)}
 
+\subsection{TLS free-list multi-level allocator}
+
+The class implements the logic described \hyperref[free_list_algo]{here}.
+
+\begin{lstlisting}
+class FreeListMultiLevelAllocator {
+	FreeListMultiLevelAllocator()
+	// Exceptions:
+	// 	may throw, strong exception safety
+
+	FreeListMultiLevelAllocator(
+		const FreeListMultiLevelAllocator&) = delete;
+
+	FreeListMultiLevelAllocator(
+		FreeListMultiLevelAllocator&&) = delete;
+
+	FreeListMultiLevelAllocator& operator=(
+		const FreeListMultiLevelAllocator&) = delete;
+	// We will use object as s singleton, no copying and assigning
+
+	template <typename T>
+	T* Allocate(const size_t size);
+	// Return value:
+	// 	a pointer to allocated block
+	// Exceptions:
+	// 	may throw std::bad_alloc
+	// 	strong exception safety: no side effects in exception case
+
+	template <typename T>
+	void Deallocate(T* pointer, const size_t size) noexcept;
+};
+
+thread_local FreeListMultiLevelAllocator global_allocator;
+// Memory allocations would be controlled by this TLS singleton
+
+template <typename T>
+class FixedFreeListMultiLevelAllocator<T> {
+	FixedFreeListMultiLevelAllocator() noexcept;
+
+	FixedFreeListMultiLevelAllocator(
+		const FixedFreeListMultiLevelAllocator&) noexcept;
+
+	template <class U>
+	FixedFreeListMultiLevelAllocator(
+		const FixedFreeListMultiLevelAllocator<U>&) noexcept;
+	// These three methods are empty,
+	// 	they are needed for compatibility with std::allocator
+
+	T* allocate(const size_t n);
+	// Calls global_allocator.Allocate<T>(n)
+	// Return value:
+	// 	a pointer to allocated block
+	// Exceptions:
+	// 	may throw std::bad_alloc
+	// 	strong exception safety: no side effects in exception case
+
+	void deallocate(T* p, const size_t n) noexcept;
+	// Calls global_allocator.Deallocate<T>(p, n)
+};
+\end{lstlisting}
+
 \subsection{Lock-free queue}
 
 $LockFreeQueue<TElement>$ is obviously an implementation of lock-free queue. It contains the following functions:
 
 
 \begin{lstlisting}
-LockFreeQueue<TElement> {
+class LockFreeQueue<TElement> {
 	void Push(TElement new_element);
 	// Exceptions:
 	// 	Strong exception safety: in case of failure
