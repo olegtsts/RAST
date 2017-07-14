@@ -7,6 +7,7 @@
 %\cftsetindents{subsection}{0.5in}{0.5in}
 \usepackage[utf8]{inputenc}
 %\usepackage[dvips]{graphicx,graphics}
+\usepackage{enumitem}
 \usepackage{listings}
 \usepackage{xcolor}
 \definecolor{dkgreen}{rgb}{0,0.6,0}
@@ -32,6 +33,7 @@
 \titleformat{\section}[block]{\color{blue}\Large\bfseries\filcenter}{\thesection.}{1em}{}
 \titleformat{\subsection}[hang]{\color{blue}\large\filcenter}{\thesubsection.}{1em}{}
 
+\setlist[itemize,1]{leftmargin=\dimexpr 26pt+.3in}
 \usepackage{a4wide}
 \lstset{language=C++,
                 basicstyle=\ttfamily,
@@ -80,12 +82,11 @@ Also we want to join small segments of memory returned by consumers to one large
 \begin{center}\includegraphics[width=0.5 \textwidth]{image2.png}\end{center}
 
 The block will consist of three logical parts:
-
-$\bullet$ FrontControl, which stores the $data\_size$ which is size of the block, $localnext$ and $localprev$ pointers, $offset$ in external allocated segment, and $total\_size$ of external segment, and $is\_owned$ -- whether the block is owned by the allocator itself or was it given away to the consumer.
-
-$\bullet$ Data -- raw byte space, which would be given an external consumer to control
-
-$\bullet$ BackControl, which stores pointer to the FrontControl (pointer to the beginning of the entire block)
+\begin{itemize}
+\item FrontControl, which stores the $data\_size$ which is size of the block, $localnext$ and $localprev$ pointers, $offset$ in external allocated segment, and $total\_size$ of external segment, and $is\_owned$ -- whether the block is owned by the allocator itself or was it given away to the consumer.
+\item Data -- raw byte space, which would be given an external consumer to control
+\item BackControl, which stores pointer to the FrontControl (pointer to the beginning of the entire block)
+\end{itemize}
 
 $localprev$ and $localnext$ pointers will help us to build freelists, which were described above. BackControl block will help us to find the block, previous to some specific Block, so that we could join two blocks together in case they both have been returned to the allocator. Here is how joining procedure works:
 
@@ -93,67 +94,44 @@ $localprev$ and $localnext$ pointers will help us to build freelists, which were
 
 The steps are very simple:
 
-$\bullet$ detach first block from its list
-
-$\bullet$ detach second block from its list
-
-$\bullet$ point BackControl2 to FrontControl1
-
-$\bullet$ change FrontControl1 information about block size
-
-$\bullet$ do nothing about BackControl1 and FrontControl2, because now we threat them as a garbage part of MergedData, and we do not have to care about their contents so far
-
-$\bullet$ attach new merged block to its new list (based on $log(size)$ where $size$ is a sum of sizes of these two blocks) by changing $localprev$ and $localnext$ pointers of FrontControl.
-
-\smallskip
+\begin{itemize}
+\item detach first block from its list
+\item detach second block from its list
+\item point BackControl2 to FrontControl1
+\item change FrontControl1 information about block size
+\item do nothing about BackControl1 and FrontControl2, because now we threat them as a garbage part of MergedData, and we do not have to care about their contents so far
+\item attach new merged block to its new list (based on $log(size)$ where $size$ is a sum of sizes of these two blocks) by changing $localprev$ and $localnext$ pointers of FrontControl.
+\end{itemize}
 
 Also, one can easily imagine how to split one large block into two smaller.
 
-\smallskip
-
 Blocks contained in the same external memory segment (which allocator asked from the system) may be joined and split so that we know exactly how many consequent free to use bytespace fragments do we have.
-\smallskip
 
 Finally, the allocation procedure is the following:
 
-$\bullet$ calculate integral part $N = int(log(size))$ of the size of the memory consumer asks to allocate
-
-$\bullet$ if the corresponding $N$-th list of blocks is empty, we allocate several external blocks of the sizes $2^{N}$ and build Block structure upon each of them, putting blocks to the $N$-th list
-
-$\bullet$ detach first block from the list
-
-$\bullet$ split the block into two blocks: first block has exactly needed size, second block consists of what is remained
-
-$\bullet$ attach second block to its corresponding list
-
-$\bullet$ mark the first block as not owned by allocator
-
-$\bullet$ return a pointer to the Data section of the first block to a consumer
-
-\smallskip
+\begin{itemize}
+\item calculate integral part $N = int(log(size))$ of the size of the memory consumer asks to allocate
+\item if the corresponding $N$-th list of blocks is empty, we allocate several external blocks of the sizes $2^{N}$ and build Block structure upon each of them, putting blocks to the $N$-th list
+\item detach first block from the list
+\item split the block into two blocks: first block has exactly needed size, second block consists of what is remained
+\item attach second block to its corresponding list
+\item mark the first block as not owned by allocator
+\item return a pointer to the Data section of the first block to a consumer
+\end{itemize}
 
 The deallocation procedure:
-
-$\bullet$ receive from a consumer a pointer to deallocate data
-
-$\bullet$ calculate the pointer to FrontControl (by subtracting $sizeof(FrontControl)$ from Data pointer)
-
-$\bullet$ mark block as owned by the allocator
-
-$\bullet$ read $offset$ from FrontControl, if $offset > 0$, than there is some previous block in the external memory segment.
-
-$\bullet$ calculate the pointer to BackControl of the previous block (by subtracting $sizeof(BackControl)$ from the pointer to the current block)
-
-$\bullet$ get the pointer to the FrontControl of the previous block via BackControl
-
-$\bullet$ check whether the previous block is owned by the allocator and if it is, merge it with the current block
-
-$\bullet$ if $offset < total\_size$ where $total\_size$ is the size of external allocated memory segment, we may want to check whether we can merge with the forthcoming block
-
-$\bullet$ calculate the pointer to the FrontControl of the forthcoming block (by adding $data\_size + sizeof(FrontControl) + sizeof(BackControl)$ to the pointer to the current block)
-
-$\bullet$ check if the forthcoming block is owned by allocator using its FrontControl and if it is, merge it with the current block.
-
+\begin{itemize}
+\item receive from a consumer a pointer to deallocate data
+\item calculate the pointer to FrontControl (by subtracting $sizeof(FrontControl)$ from Data pointer)
+\item mark block as owned by the allocator
+\item read $offset$ from FrontControl, if $offset > 0$, than there is some previous block in the external memory segment.
+\item calculate the pointer to BackControl of the previous block (by subtracting $sizeof(BackControl)$ from the pointer to the current block)
+\item get the pointer to the FrontControl of the previous block via BackControl
+\item check whether the previous block is owned by the allocator and if it is, merge it with the current block
+\item if $offset < total\_size$ where $total\_size$ is the size of external allocated memory segment, we may want to check whether we can merge with the forthcoming block
+\item calculate the pointer to the FrontControl of the forthcoming block (by adding $data\_size + sizeof(FrontControl) + sizeof(BackControl)$ to the pointer to the current block)
+\item check if the forthcoming block is owned by allocator using its FrontControl and if it is, merge it with the current block.
+\end{itemize}
 \newpage
 
 \section{Detailed Code Architecture (classes and methods)}
