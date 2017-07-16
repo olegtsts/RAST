@@ -51,6 +51,7 @@
 }
 \begin{document}
 
+\begin{center} \hyperref[debug]{\Huge{debug}}\end{center}
 \begin{center}
  \Large{\bf RAST: highly distributed DB project.}
 
@@ -65,7 +66,7 @@
 \subsection{Free-list multi-level allocator}
 \label{free_list_algo}
 
-On of the most important steps in order to make a low-latency system is to consider the allocation problem. The problem is that sometimes different components of the program require very small parts of memory to be allocated. Asking the system to allocate memory directly can result in slower performance. That's why it is better to allocate large memory segment and distribute its parts among several consumers.
+On of the most important steps in order to make a low-latency system is to consider the allocation problem. The problem is that sometimes different components of the program require very small parts of memory to be allocated. Asking the system to allocate memory directly would result in slower performance. That's why it is better to allocate large memory segment and distribute its parts among several consumers.
 
 But here we face another difficulty, so called fragmentation problem. Imagine that an allocated segment is separated into several parts owned by consumers. Some time after, some of the consumers returned their own parts to allocator (calling deallocate method). Afterwards it appears that the returned memory in control of allocator is represented as distinct small fragments. Those fragments cannot be given to a consumer, who asks for a larger memory segment, than the size of the separate fragment. If there is a lot of such unusable fragments, we would have a lot of memory allocated, which will never be used. In order to avoid this problem, we have to force each small fragment to be used by a consumer who asks for a small amount of memory.
 
@@ -134,11 +135,75 @@ The deallocation procedure:
 \end{itemize}
 \newpage
 
+\subsection{Multi-reference counting lock-free queue}
+\label{lock_free_queue}
+
+Queue is a basic container, which is often desired to be used in more or less complicated systems. Although queue implementation is very simple, it is not thread-safe. In order to make it thread-safe, one may decide to use mutexes in Pop and Push operations. The idea is not good enough for several reasons:
+\begin{itemize}
+	\item all threads would compete against each other for gaining control over mutex,
+	\item all kernels would have to sync the mutex state via cache ping-pong, which would lead to plenty of time waisted on system calls,
+	\item jobs of threads would be serialized, that is, the queue is 100\% not scalable.
+\end{itemize}
+
+The main idea is that if we get down to the details of queue implementation, we may reorganize it in such a way, that we would not need to have mutual exclusive access to guarantee that each operation works fine. That is, we may obtain a lock-free algorithm on the queue.
+
+In order to do that, let us represent queue as a linked list, each node of each except for the last one, contains data elements. The last node, which is the tail of the queue would not contain any data at all. Let us call it a dumb node:
+
+\begin{center}\includegraphics[width=0.5 \textwidth]{image4.png}\end{center}
+
+Head, Tail and Next pointers inside data structure would be atomic pointers, which would be changed using CAS operations. The main idea of Push is:
+\begin{itemize}
+	\item put new data to the dumb node
+	\item create another dumb node and mark it as a tail
+\end{itemize}
+
+But these are two distinct actions, which are not guarded by mutual exclusion and thus are not atomic. So, by choosing this strategy we should agree that it is OK for the queue to be one of the following two:
+
+\begin{center}\includegraphics[width=0.5 \textwidth]{image5.png}\end{center}
+
+That is, we agree on purpose that queue may either have dumb element or not have dumb element. But if it is like that, we have to redesign Push:
+\label{debug}
+\begin{itemize}
+	\item try CAS data on the tail (nullptr $\rightarrow$ our new data)
+	\item if CAS succeeded, the queue actually had a dumb node and now we may proceed to adding a new dumb node
+	\item if CAS failed, the queue does not have a dumb element, so we firstly create a dumb node as a tail, and retry the algorithm from the start
+\end{itemize}
+
+Changing tail pointer is also a CAS operation, but in case if it fails, we realize that another thread have already moved tail forward and thus we do not have to do anything, so we will not process tail CAS operation failure on purpose without harming algorithm invariants at all.
+
+The detailed version of Push consists of the following steps:
+\begin{itemize}
+	\item allocate new data
+	\item allocate new dumb node
+	\item L1: load tail
+	\item L2: try CAS tail.data (nullptr $\rightarrow$ allocated new data)
+	\item L3: if L2 succeeded, try CAS tail.next (nullptr $\rightarrow$ new dumb node)
+	\item if L3 failed, somebody already moved tail to new node, so deallocate new dumb node and finish
+	\item if L3 succeeded, try CAS tail old\_tail $\rightarrow$ new dumb node, do not care about results
+	\item L4: if L2 failed, we do not have dumb node in the end of the queue, try CAS tail$\rightarrow$next (nullptr $\rightarrow$ new dumb node)
+	\item if L4 succeeded, we shall allocate new dumb node and repeat algorithm from L1 point
+	\item if L4 failed, we repeat algorithm from L1 point using the same already-allocated new dumb node
+\end{itemize}
+
+Note that the only action among these which may throw is an allocation, but all allocations happen-before successful L2 step. That is, in case if L2 succeeded, the rest of the code in Push in exception-free. Success of L2 operation means that new data is put to the queue, failure means that the data was not put to the queue yet. This implies we are having strong exception safety on Push operation: if it throws, it would surely mean that data was not put to the queue. This is the best available exception guarantee (after "noexcept") for a queue user. Of course, guaranteeing noexcept is impossible, because no one can imagine Push operation without memory allocations, which always may throw.
+
+Now let us consider Pop operation. It would check if head is equal to tail. If it is, the queue consists of dumb node only, thus there is no data. In this cast Pop would return empty unique\_ptr. In the other case, we will switch the head to the next element, giving away first node data.
+
+The detailed version of Pop consists of the following steps:
+\begin{itemize}
+	\item read head, tail
+	\item L1: check head == tail
+	\item if L1 is true, return empty unique\_ptr
+	\item L2: if L1 is false, do CAS head (current, next)
+	\item if L2 failed, retry from the start
+	\item if L2 succeeded, store and exchange data from old head, return it to the caller
+\end{itemize}
+
 \section{Detailed Code Architecture (classes and methods)}
 
 \subsection{TLS free-list multi-level allocator}
 
-The class implements the logic described \hyperref[free_list_algo]{here}.
+The class implements the allocation logic described \hyperref[free_list_algo]{here}.
 
 \begin{lstlisting}
 class FreeListMultiLevelAllocator {
@@ -199,8 +264,7 @@ class FixedFreeListMultiLevelAllocator<T> {
 
 \subsection{Lock-free queue}
 
-$LockFreeQueue<TElement>$ is obviously an implementation of lock-free queue. It contains the following functions:
-
+$LockFreeQueue<TElement>$ is an implementation of lock-free queue described \hyperref[lock_free_queue]{here}. It contains the following functions:
 
 \begin{lstlisting}
 class LockFreeQueue<TElement> {
