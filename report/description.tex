@@ -63,6 +63,40 @@
 \tableofcontents
 
 \newpage
+\section{Coding patterns}
+\subsection{Function specifications cascade merging}
+\label{subsec:specifications_cascade_merging}
+
+Let us assume we are to write some template class, which may be customized with any amount of template parameters. Then, of course, we have to use variadic templates. When using variadic templates, we are to define class through its older version with less amount of template arguments, thus forcing compiler to produce a code for several hierarchical classes. What is often used here is so called cascade inheritance. That is, new class which is specified by a larger amount of template parameters is being inherited from an older version.
+
+Imagine that we want target class $X<A,B,C>$ to have a template function, which has concrete specifications for template parameters being equal to $A$, $B$ or $C$. For instance, all classes $A$, $B$ and $C$ have $Output$ method and we want class $X$ to have $Output<T>$ method which for $[T=A]$ calls $Output$ method from class $A$, for $[T=B]$ calls $Output$ method of class $B$, etc.
+
+First difficulty we would face considering such approach is that template specifications are not allowed in non-global scope (inside class $X$, for instance). That is due to the fact, that if those specifications depend on template parameters of $X$ class itself, the more complicated version of template processing algorithm would be required to handle this. But, template processing is not that smart enough to guess what author meant here. So, we have to specialize functions another way.
+
+Let us do specifications by means of input arguments. In order to do so let us introduce an empty template class $TypeSlecifier<T>$. We may now write three versions of function, which compiler would treat well:
+
+\begin{lstlisting}
+class X {
+	Output(const TypeSlecifier<A>&) {
+		A().Output();
+	}
+	Output(const TypeSlecifier<B>&) {
+		B().Ouptut();
+	}
+	Output(const TypeSlecifier<C>&) {
+		C().Ouptut();
+	}
+};
+\end{lstlisting}
+Such a function would be called as follows:
+
+\begin{lstlisting}
+x.Output(TypeSlecifier<A>());
+x.Output(TypeSlecifier<B>());
+x.Output(TypeSlecifier<C>());
+\end{lstlisting}
+
+
 \section{Algorithmic basis}
 
 \subsection{Free-list multi-level allocator}
