@@ -73,40 +73,44 @@ Imagine that we want target class $X<A,B,C>$ to have a template function, which 
 
 First difficulty we would face considering such approach is that template specifications are not allowed in non-global scope (inside class $X$, for instance). That is due to the fact, that if those specifications depend on template parameters of $X$ class itself, the more complicated version of template processing algorithm would be required to handle this. But, template processing is not that smart enough to guess what author meant here. So, we have to specialize functions another way.
 
-Let us do specifications by means of input arguments. In order to do so let us introduce an empty template class $TypeSlecifier<T>$. We may now write three versions of function, which compiler would treat well:
+Let us do specifications by means of input arguments. In order to do so let us introduce an empty template class $TypeSpecifier<T>$. We may now write three versions of function, which compiler would treat well:
 
 \begin{lstlisting}
 class X {
-	void Output(const TypeSlecifier<A>&) {
+public:
+	void Output(const TypeSpecifier<A>&) {
 		A().Output();
 	}
-	void Output(const TypeSlecifier<B>&) {
-		B().Ouptut();
+	void Output(const TypeSpecifier<B>&) {
+		B().Output();
 	}
-	void Output(const TypeSlecifier<C>&) {
-		C().Ouptut();
+	void Output(const TypeSpecifier<C>&) {
+		C().Output();
 	}
 };
 \end{lstlisting}
 Such a function would be called as follows:
 
 \begin{lstlisting}
-x.Output(TypeSlecifier<A>());
-x.Output(TypeSlecifier<B>());
-x.Output(TypeSlecifier<C>());
+x.Output(TypeSpecifier<A>());
+x.Output(TypeSpecifier<B>());
+x.Output(TypeSpecifier<C>());
 \end{lstlisting}
 What remains is to represent this code using template processing:
 
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+public:
 	void Output() {}
 };
+
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
-	using X<Args...>::Ouptut;
-	void Output(const TypeSlecifier<T>&) {
-		T().Ouptut();
+public:
+	using X<Args...>::Output;
+	void Output(const TypeSpecifier<T>&) {
+		T().Output();
 	}
 };
 \end{lstlisting}
@@ -117,17 +121,19 @@ The only drawback here is that a user of the class has to know about some ``Type
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+public:
 	void Output() {}
 };
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
-	using X<Args...>::Ouptut;
-	void Output(const TypeSlecifier<T>&) {
-		T().Ouptut();
+public:
+	using X<Args...>::Output;
+	void Output(const TypeSpecifier<T>&) {
+		T().Output();
 	}
 	template <typename T2>
 	void TemplateOutput() {
-		Output(TypeSlecifier<T2>());
+		Output(TypeSpecifier<T2>());
 	}
 };
 \end{lstlisting}
@@ -155,28 +161,33 @@ A situation where such a complicated technique starts to be useful is when custo
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+public:
 	X()
 	: max_index(0)
 	{}
 
-	int GetIndexImpl() {}
+	void GetIndexImpl() {}
 protected:
 	int max_index;
 };
+
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
+public:
 	using X<Args...>::GetIndexImpl;
+    using X<Args...>::max_index;
+
 	X()
 	: inheritance_level_index(max_index++)
 	{}
 
-	int GetIndexImpl(const TypeSlecifier<T>&) {
+	int GetIndexImpl(const TypeSpecifier<T>&) {
 		return inheritance_level_index;
 	}
 
 	template <typename T2>
 	int GetIndex() {
-		GetIndexImpl(TypeSlecifier<T2>());
+		return GetIndexImpl(TypeSpecifier<T2>());
 	}
 private:
 	int inheritance_level_index;
@@ -193,6 +204,7 @@ First and the simplest idea would be to do recursive calls until reaching needed
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+public:
 	X()
 	: max_index(0)
 	{}
@@ -203,6 +215,9 @@ protected:
 };
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
+public:
+    using X<Args...>::max_index;
+
 	X()
 	: inheritance_level_index(max_index++)
 	{}
@@ -219,31 +234,45 @@ private:
 };
 \end{lstlisting}
 However, the drawback of such an approach is obvious: we do a lot of recursive calls, while another strategy would help up to avoid it. To cope with the task without recursive calls, we should have a fast way of accessing former ancestor classes. Let us store all hierarchical instances in vector then:
+%TODO change description
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+protected:
+    class Y {
+    public:
+        virtual void OutputImpl() {}
+    };
+public:
 	X()
 	{}
 
 	virtual void OutputImpl() {}
 protected:
-	std::vector<X *> instances;
+	std::vector<Y *> instances;
 };
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
+private:
+    class Y : public X<>::Y {
+        public:
+            void OutputImpl() {
+                T().Output();
+            }
+    };
+public:
+    using X<Args...>::instances;
+
 	X()
+    : X<Args...>()
 	{
-		instances.push_back(new X());
+		instances.push_back(new Y());
 	}
 
-	void OutputImpl() {
-		T().Output();
-	}
 
 	void Output(const int index) {
 		instances[index]->OutputImpl();
 	}
-private:
 };
 \end{lstlisting}
 Here in the constructor we initialize instances for each level of inheritance. Now we may access each level using this vector and use dynamic function resolution to call concrete ``OutputTmpl'' function, which does the job.
@@ -254,8 +283,10 @@ One of the most efficient ways to let parent know about a forthcoming child type
 \begin{lstlisting}
 template <typename ... Args>
 class X {
+public:
 	template <typename GlobalX>
 	class Y{
+    public:
 		Y(GlobalX& x)
 		: x(x)
 		{}
@@ -267,46 +298,79 @@ class X {
 
 	X()
 	{}
+
+    template <typename GlobalX>
+    void LazyInitImpl(GlobalX&, std::vector<X::Y<GlobalX>*>&) {}
 };
 
 template <typename T, typename ... Args>
 class X<T, Args...>: public X<Args...> {
+public:
 	template <typename GlobalX>
 	class Y : public X<>::template Y<GlobalX> {
+    public:
 		using X<>::template Y<GlobalX>::Y;
+        using X<>::template Y<GlobalX>::x;
 
 		void Output() {
-			T().Output<X>(x);
+			T().template Output<GlobalX>(x);
 		}
 	};
 
 	template <typename GlobalX>
-	void LazyInitImpl(std::vector<X<>::Y<X<>>*>& y_hierarchical_instances) {
-		X<Args...>::LazyInitImpl<GlobalX>(y_hierarchical_instances);
-		y_hierarchical_instances.push_back(new Y<GlobalX>(*this));
+	void LazyInitImpl(GlobalX& x, std::vector<X<>::Y<GlobalX>*>& y_hierarchical_instances) {
+		X<Args...>::template LazyInitImpl<GlobalX>(x, y_hierarchical_instances);
+		y_hierarchical_instances.push_back(new Y<GlobalX>(x));
 	}
 
 	void LazyInit() {
-		LazyInitImpl<X>(y_hierarchical_instances);
+		LazyInitImpl<X>(*this, y_hierarchical_instances);
 	}
 
-	X<>::template Y<X<>>* GetYInstance(const int index) {
+	X<>::template Y<X>* GetYInstance(const int index) {
 		return y_hierarchical_instances[index];
 	}
 private:
-	std::vector<X<>::template Y<X<>>*> y_hierarchical_instances;
+	std::vector<X<>::template Y<X>*> y_hierarchical_instances;
 };
 \end{lstlisting}
 Usage of this class would be as follows:
 
 \begin{lstlisting}
-x = FinalX<A, B, C>();
-x.LazyInit();
-x.GetYInstance(0)->Output();
-\end{lstlisting}
-Note that now classes ``A'', ``B'' and ``C'' are able to use $x$ instance functions. Yet, as far as these classes does not know about $x$ type, their ``Output'' function has to be template, still this poses no difficulty at all.
+class A {
+public:
+    template <typename GlobalX>
+    void Output(GlobalX& x) {
+        std::cout << "This is A!\n";
+    }
+};
+class B {
+public:
+    template <typename GlobalX>
+    void Output(GlobalX& x) {
+        std::cout << "This is B!\n";
+    }
+};
+class C {
+public:
+    template <typename GlobalX>
+    void Output(GlobalX& x) {
+        std::cout << "This is C!\n";
+        x.GetYInstance(1)->Output();
+    }
+};
 
-Now, with the usage of ``reverse template instantiation'' pattern we are able to access methods of classes by index and to pass final child class object to these methods.
+
+int main() {
+    X<A,B,C> x;
+    x.LazyInit();
+    x.GetYInstance(0)->Output();
+    return 0;
+}
+\end{lstlisting}
+Note that now classes ``A'', ``B'' and ``C'' are able to use $x$ instance functions. Yet, as far as these classes does not know about $x$ type, their ``Output'' function has to be template.
+
+Now, with the usage of ``reverse template instantiation'' pattern we are able to access methods of classes by index and to access external controller class object inside these methods.
 
 \section{Algorithmic basis}
 
