@@ -20,7 +20,6 @@
 \usepackage{amssymb,amsmath,amsthm,amsfonts}
 \usepackage{amsopn}
 \usepackage{a4wide}
-
 \usepackage{verbatim}
 \usepackage{hyperref}
 \hypersetup{
@@ -44,7 +43,7 @@
 		  numberstyle=\tiny\color{gray},
 		  keywordstyle=\color{blue},
 		  commentstyle=\color{dkgreen},
-		  stringstyle=\color{mauve},
+		  stringstyle=\color{red},
 		  breaklines=true,
 		  breakatwhitespace=true,
 		  tabsize=3,
@@ -233,8 +232,7 @@ private:
 	int inheritance_level_index;
 };
 \end{lstlisting}
-However, the drawback of such an approach is obvious: we do a lot of recursive calls, while another strategy would help up to avoid it. To cope with the task without recursive calls, we should have a fast way of accessing former ancestor classes. Let us store all hierarchical instances in vector then:
-%TODO change description
+However, the drawback of such an approach is obvious: we do a lot of recursive calls, while another strategy would help up to avoid it. To cope with the task without recursive calls, we should have a fast way of accessing former ancestor classes. Let us store all hierarchical instances in vector then. But we cannot store instances of class ``X'' itself for the reason that it would result in infinite recursion depth if we would call instantiation of ``X'' class inside itself. Consequently, we have to use another class-helper ``Y'' the following way:
 \begin{lstlisting}
 template <typename ... Args>
 class X {
@@ -368,9 +366,9 @@ int main() {
     return 0;
 }
 \end{lstlisting}
-Note that now classes ``A'', ``B'' and ``C'' are able to use $x$ instance functions. Yet, as far as these classes does not know about $x$ type, their ``Output'' function has to be template.
+Note that now classes ``A'', ``B'' and ``C'' are able to use $x$ instance. Yet, as far as these classes does not know about $x$ type, their ``Output'' function has to be template.
 
-Now, with the usage of ``reverse template instantiation'' pattern we are able to access methods of classes by index and to access external controller class object inside these methods.
+Now, with the usage of ``reverse template instantiation'' pattern we are able to access methods of classes by index and to access external controller class object inside each of the class passed as a template parameter.
 
 \section{Algorithmic basis}
 
