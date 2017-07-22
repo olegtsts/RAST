@@ -77,13 +77,13 @@ Let us do specifications by means of input arguments. In order to do so let us i
 
 \begin{lstlisting}
 class X {
-	Output(const TypeSlecifier<A>&) {
+	void Output(const TypeSlecifier<A>&) {
 		A().Output();
 	}
-	Output(const TypeSlecifier<B>&) {
+	void Output(const TypeSlecifier<B>&) {
 		B().Ouptut();
 	}
-	Output(const TypeSlecifier<C>&) {
+	void Output(const TypeSlecifier<C>&) {
 		C().Ouptut();
 	}
 };
@@ -95,6 +95,100 @@ x.Output(TypeSlecifier<A>());
 x.Output(TypeSlecifier<B>());
 x.Output(TypeSlecifier<C>());
 \end{lstlisting}
+What remains is to represent this code using template processing:
+
+\begin{lstlisting}
+template <typename ... Args>
+class X {
+	void Output() {}
+};
+template <typename T, typename ... Args>
+class X<T, Args...>: public X<Args...> {
+	using X<Args...>::Ouptut;
+	void Output(const TypeSlecifier<T>&) {
+		T().Ouptut();
+	}
+};
+\end{lstlisting}
+By means of ``using'' construction we add all versions of Output function from previous inheritance level to the next one, afterwards adding new version associated with current new template parameter T. As far as we put ``using Output'' inside the code, we have to define ``Output'' symbol inside very base class, which accepts zero template parameters. In order to do that, we firstly define version of class ``X'', which accepts any amount of template arguments. The trick is that such implementation would only be considered if only ``X'' was zero template arguments, otherwise the declaration $X<T, Args...>$ would be chosen by compiler to process.
+
+The only drawback here is that a user of the class has to know about some ``TypeSpecifier'' class to use ``Output'' function. But this can be fixed by introducing a final template function:
+
+\begin{lstlisting}
+template <typename ... Args>
+class X {
+	void Output() {}
+};
+template <typename T, typename ... Args>
+class X<T, Args...>: public X<Args...> {
+	using X<Args...>::Ouptut;
+	void Output(const TypeSlecifier<T>&) {
+		T().Ouptut();
+	}
+	template <typename T2>
+	void TemplateOutput() {
+		Output(TypeSlecifier<T2>());
+	}
+};
+\end{lstlisting}
+
+Now a call to ``Output'' function looks as follows:
+\begin{lstlisting}
+x.TemplateOutput<A>();
+x.TemplateOutput<B>();
+x.TemplateOutput<C>();
+\end{lstlisting}
+
+That is what is called ``cascade merging of specifications'' here.
+
+The example on which technique is explained is rather simple and it would be weird to write such a complicated code, because one would just do something like this:
+\begin{lstlisting}
+template <typename T>
+void Output() {
+	T().Output();
+}
+\end{lstlisting}
+In that, in the example above there was no actual need in inheritance, the example is just used in order to demonstrate the pattern. But when is this pattern really needed then?
+
+A situation where such a complicated technique starts to be useful is when custom function needs to know something about the moment template argument was being added to template variadic list. That is, when in such a ``Output'' function we have to access a specific inheritance level. Imagine, for instance, that in class $X<A,B,C>$ we want to have a function $GetIndex$, which would by class name $A$, $B$ or $C$ return an index $2$, $1$ or $0$. To do it we have to store somewhere a correspondence between classes and indices. The best place for this is an inherited class:
+
+\begin{lstlisting}
+template <typename ... Args>
+class X {
+	X()
+	: max_index(0)
+	{}
+
+	int GetIndexImpl() {}
+
+	void Output() {}
+protected:
+	int max_index;
+};
+template <typename T, typename ... Args>
+class X<T, Args...>: public X<Args...> {
+	using X<Args...>::GetIndexImpl;
+	X()
+	: inheritance_level_index(max_index++)
+	{}
+
+	int GetIndexImpl(const TypeSlecifier<T>&) {
+		return inheritance_level_index;
+	}
+
+	template <typename T2>
+	int GetIndex() {
+		GetIndexImpl(TypeSlecifier<T2>());
+	}
+private:
+	int inheritance_level_index;
+};
+\end{lstlisting}
+That we have basically done here is incrementing ``inheritance\_level\_index'' in instantiation of each hierarchical class object, thus having increasing indices in the inheritance chain. Afterwards, while user is calling $GetIndex<T>$ function, the corresponding ``GetIndexImpl'' from the corresponding inheritance level would be called, and this function has a direct access to all the data stored in the level of inheritance it was defined. Thus, it can easily return the required index.
+
+%\subsection{Reverse template instantiation}
+%\label{subsec:reverse_template_instantiation}
+
 
 
 \section{Algorithmic basis}
