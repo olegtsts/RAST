@@ -771,5 +771,253 @@ class LockFreeQueue<TElement> {
 };
 \end{lstlisting}
 
+\subsection{Message processor}
+\label{subsec:message_processor}
+Message processor is a class with $Ping$ method, which is called periodically, and $Receive$ method, which is called on receiving a message from another message processor. Both methods accept object $sender$ of unspecified type and may use it in order to send messages to another message processors.
+
+All message processors have base class $MessageProcessorBase$:
+
+\begin{lstlisting}
+class MessageProcessorBase {
+public:
+	template <typename Sender>
+	void Ping(const Sender&) {}
+	// Empty method, needed if we do not want to define corresponding Ping method in child class
+
+	virtual ~MessageProcessorBase() noexcept {}
+};
+\end{lstlisting}
+
+All message processors look like this:
+\begin{lstlisting}
+class MessageProcessor : public MessageProcessorBase {
+public:
+	using MessageProcessorBase::MessageProcessorBase;
+
+	template <typename Sender>
+	void Ping(const Sender& sender) {
+		// here a call to sender.template Send<YetAnotherMessageProcessor>(new AnotherMessageType())
+		// may be or may not be present
+	}
+	// Ping method may be absent here
+	// Exceptions: depend on implementation (desired strong safety)
+
+	template <typename Sender>
+	void Receive(const ReceivingFrom<AnotherMessageProcessor>&, const MessageType& message, const Sender& sender) {
+		// here a call to sender.template Send<YetAnotherMessageProcessor>(new AnotherMessageType())
+		// may be or may not be present
+	}
+	// Exceptions: depend on implementation (desired strong safety)
+};
+\end{lstlisting}
+%TODO check strong safety afterwards
+In here $ReceivingFrom$ is a specification helper dumb class:
+\begin{lstlisting}
+template <typename T>
+class ReceivingFrom {};
+\end{lstlisting}
+This class is needed to specify several Receive methods in the $MessageProcessor$ in order to specialize, from which $AnotherMessageProcessor$ are we receiving a message.
+
+$MessageType$ is an arbitrary class, which stores the message itself.
+
+$Sender$ is a template parameter, which is needed for the reason that sender object is of an unspecified type.
+
+\subsection{Message passing tree}
+
+$MessagePassingTree<Edge<MessageProcessor1, MessageProcessor2, MessageType1>, Edge<MessageProcessor3, MessageProcessor4, MessageType2>, ...>$ is a message-processor controller. It helps to register message passing communication edges and check are there unregistered send operations inside \hyperref[subsec:message_processor]{message processors} at a compile time. Additionally, it stores message passing queues, which help to send messages from one message processor to another.
+
+Moreover, this class provides an opportunity to access distinct message processors by index as well as access message queues by their indices. Furthermore, it can tell which indices of message queues are connected with which message processor indices.
+
+Hence, this is  a generic structure which controls message passing process and provides access by indices, which simplifies further programming.
+
+The structure here is rather complicated and based on the \hyperref[subsec:specifications_cascade_merging]{specifications cascade merging} and \hyperref[subsec:reverse_template_instantiation]{reverse template instantiation} patterns.
+
+First of all, there is a zero-template very-base class $Piper<>$ definition:
+\begin{lstlisting}
+template <typename ... Args>
+class Piper {
+protected:
+	template <typename GlobalPiper>
+	class EdgeProxy {
+	public:
+		EdgeProxy(GlobalPiper& piper) noexcept;
+		// Remembers piper reference
+
+		virtual void NotifyAboutMessage() const = 0;
+
+		virtual ~EdgeProxy() noexcept {}
+	protected:
+		GlobalPiper& piper;
+	};
+
+	template <typename GlobalPiper>
+	class MessageProcessorProxy {
+	public:
+		MessageProcessorProxy(GlobalPiper& piper, const int message_processor_index) noexcept;
+		// init piper and message_processor_index
+
+		template <typename MP>
+		MP& GetMessageProcessor() const noexcept;
+		// Returns MessageProcessor instance
+	protected:
+		GlobalPiper& piper;
+		int message_processor_index;
+	}
+public:
+	Piper() noexcept;
+	// initializes max_message_processor_index and max_edge_index as zero
+
+	template <typename MP>
+	int GetMessageProcessorIndexImpl(const TypeSpecifier<MP>&) noexcept;
+	// returns -1
+
+	template <typename GlobalPiper>
+	void FillEdgeProxysImpl(GlobalPiper&, std::vector<std::unique_ptr<Piper::EdgeProxy<GlobalPiper>>>&);
+	// Empty function
+	// May throw, basic exception safety
+
+	void GetEdgeIndexImpl() noexcept;
+	// Empty function
+
+	template <typename GlobalPiper>
+	void AddMessageProcessorsImpl(GlobalPiper&,
+		std::vector<std::unique_ptr<Piper::MessageProcessorProxy<GlobalPiper>>>&);
+	// Empty function
+	// May throw, basic exception safety
+
+	virtual ~Piper();
+protected:
+	int max_message_processor_index;
+	int max_edge_index;
+	std::vector<std::vector<int>> dest_pipes;
+	std::vector<std::deque<std::unique_ptr<MessageBase>>> queues;
+	std::vector<std::unique_ptr<MessageProcessorBase>> message_processors;
+};
+\end{lstlisting}
+
+Now the definition of a complete inherited class
+\begin{lstlisting}
+template <typename From, typename To, typename Message, typename ... Args>
+class Piper<Edge<From, To, Message>, Args...> : public Piper<Args...> {
+protected:
+	template <typename GlobalPiper, typename From2>
+	class SenderProxy {
+	// Sender class for MessageProcessors.
+	// GlobalPiper is a last Piper<...> child class in the inheritance chain
+	public:
+		SenderProxy(GlobalPiper& piper) noexcept;
+		// Initialize piper reference
+
+		template <typename To2, typename Message2>
+		void Send(std::unique_ptr<Message2> message);
+		// May throw, strong exception safety
+	private:
+		GlobalPiper& piper;
+	};
+
+	template <typename GlobalPiper, typename MP>
+	class MessageProcessorProxy : public Piper<>::MessageProcessorProxy<GlobalPiper> {
+	public:
+		using Piper<>::MessageProcessorProxy<GlobalPiper>::MessageProcessorProxy;
+		using Piper<>::MessageProcessorProxy<GlobalPiper>::piper;
+
+		virtual void Ping() const;
+		// Calls MessageProcessor Ping method, passing a SenderProxy object
+		// May throw, strong exception safety
+
+	};
+	template <typename GlobalPiper>
+	class EdgeProxy : public Piper<>::EdgeProxy<GlobalPiper> {
+	public:
+		using Piper<>::EdgeProxy<GlobalPiper>::EdgeProxy;
+		using Piper<>::EdgeProxy<GlobalPiper>::piper;
+
+		virtual void NotifyAboutMessage() const;
+		// Calls Receive method of MessageProcessor, passing as SenderProxy object
+	};
+public:
+	using Piper<Args...>::max_message_processor_index;
+	using Piper<Args...>::GetMessageProcessorIndexImpl;
+	using Piper<Args...>::max_edge_index;
+	using Piper<Args...>::dest_pipes;
+	using Piper<Args...>::queues;
+	using Piper<Args...>::message_processors;
+	using Piper<Args...>::GetEdgeIndexImpl;
+
+	Piper() noexcept;
+	// Does nothing
+
+	template <typename GlobalPiper, typename MP>
+	void AddMessageProcessorIfNotExists(int& target_index,
+		GlobalPiper& piper,
+		std::vector<std::unique_ptr<Piper<>::MessageProcessorProxy<GlobalPiper>>>& message_processor_handlers
+		const bool is_to);
+	// Calls GetMessageProcessorIndexImpl to find MP's message processor index. If returns -1
+	// 	(from a base Piper class implementation), nothing found. In this case function generates new
+	//	message processor index (target_index = max_message_processor_index++) and pushes a new instance
+	//	of MessageProcessor to message_processors and
+	//	a new instance of MessageProcessorProxy<GlobalPiper, MP> to message_processor_handlers,
+	//	passing current new generated index of message processor to constructor of MessageProcessorProxy.
+	//	Also it pushes new empty vector to dest_pipes.
+	//	In any case it saves old or new generated message processor index to target_index.
+	// May throw, basic exception safety
+
+	template <typename GlobalPiper>
+	void AddMessageProcessorsImpl(GlobalPiper& piper,
+		std::vector<std::unique_ptr<Piper<>::MessageProcessorProxy<GlobalPiper>>>& message_processor_handlers);
+	// Calls itself for parent class,
+	//	then calls AddMessageProcessorIfNotExists for 'From' and for 'To' Message Processor.
+	//	Generates cur_edge_index (cur_edge_index = max_edge_index++)
+	//	Appends to dest_pipes and queues
+	// May throw, basic exception safety
+
+	template <typename GlobalPiper>
+	void FillEdgeProxysImpl(GlobalPiper& piper, std::vector<std::unique_ptr<Piper<>::EdgeProxy<GlobalPiper>>>& edge_handlers);
+	// Calls itself for parent class
+	//	Fills edge_handlers with EdgeProxy<GlobalPiper> instance
+	// May throw, basic exception safety
+
+	int GetMessageProcessorIndexImpl(const TypeSpecifier<From>&) noexcept;
+	// Specification which returns index of message processor 'From'
+
+	int GetMessageProcessorIndexImpl(const TypeSpecifier<To>&) noexcept;
+	// Specification which returns index of message processor 'To'
+
+	int GetEdgeIndexImpl(const TypeSpecifier<Edge<From, To, Message>>&) noexcept;
+	// Specification which returns index of edge
+private:
+	int cur_to_index;
+	int cur_from_index;
+	int cur_edge_index;
+};
+\end{lstlisting}
+
+And finally, an enclosing class $MessagePassingTree$, which does all the lazy initialization and provides access to proxy objects:
+\begin{lstlisting}
+template <typename ... Args>
+class MessagePassingTree : public Piper<Args...> {
+private:
+	using GlobalPiper = Piper<Args...>;
+public:
+	using GlobalPiper::dest_pipes;
+
+	MessagePassingTree();
+	// Calls AddMessageProcessorsImpl<GlobalPiper> to fill message_processor_handlers
+	//	calls FillEdgeProxysImpl<GlobalPiper> to fill edge_handlers
+	//
+	// May throw, basic exception safety
+
+	const Piper<>::EdgeProxy<GlobalPiper>* GetEdgeProxy(const int index) noexcept;
+	// returns edge handler from edge_handlers vector
+
+	const Piper<>::MessageProcessorProxy<GlobalPiper>* GetMessageProcessorProxy(const int index) noexcept;
+	// returns message processor handler from message_processor_handlers vector;
+
+private:
+	std::vector<std::unique_ptr<Piper<>::EdgeProxy<GlobalPiper>>> edge_handers;
+	std::vector<std::unique_ptr<Piper<>::MessageProcessorProxy<GlobalPiper>>> message_processor_handlers;
+};
+\end{lstlisting}
+
 \end{document}
 
