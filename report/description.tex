@@ -800,17 +800,17 @@ public:
 		// may be or may not be present
 	}
 	// Ping method may be absent here
-	// Exceptions: depend on implementation (desired strong safety)
+	// Exceptions: basic exception safety
 
 	template <typename Sender>
 	void Receive(const ReceivingFrom<AnotherMessageProcessor>&, const MessageType& message, const Sender& sender) {
 		// here a call to sender.template Send<YetAnotherMessageProcessor>(new AnotherMessageType())
 		// may be or may not be present
 	}
-	// Exceptions: depend on implementation (desired strong safety)
+	// Exceptions: basic exception safety
 };
 \end{lstlisting}
-%TODO check strong safety afterwards
+%TODO check exception safety afterwards
 In here $ReceivingFrom$ is a specification helper dumb class:
 \begin{lstlisting}
 template <typename T>
@@ -923,7 +923,7 @@ protected:
 
 		virtual void Ping() const;
 		// Calls MessageProcessor Ping method, passing a SenderProxy object
-		// May throw, strong exception safety
+		// May throw, basic exception safety
 
 	};
 	template <typename GlobalPiper>
@@ -934,6 +934,7 @@ protected:
 
 		virtual void NotifyAboutMessage() const;
 		// Calls Receive method of MessageProcessor, passing as SenderProxy object
+		// May throw, basic exception safety
 	};
 public:
 	using Piper<Args...>::max_message_processor_index;
