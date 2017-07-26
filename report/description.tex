@@ -805,31 +805,29 @@ The implementation here is very simple due to the fact that we have already pass
 As far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} has a unique caller requirement (must be called from one specific location in the code), our $Start$ and $Finish$ methods also have the same requirement.
 
 \subsection{Low-overhead waiting timer}
-Here we are aiming to create a timer, which helps to schedule periodic actions. In constructor it accepts a time period value. It has $CheckTime$ function, which returns $true$ if given time passed, and $false$, if time have not passed yet. If $true$ value is returned, timer resets and we proceed to waiting for the same period of time again.
+Here we are aiming to create a timer, which helps to schedule periodic actions. In constructor it accepts a time period value. It has $CheckTime$ function, which returns $true$ if given time passed, and $false$, if time have not passed yet. Also there would be a $Reset$ function, which resets waiting process from the start.
 
 As far as there can be a lot of $CheckTime$ calls in a short period of time, the good idea would be to use \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer}.
 
 Our $WaitingTimer$ would contain the following variables:
 \begin{itemize}
 	\item $time\_period$ which is set by user in $WaitingTimer$ constructor
-	\item $time\_elapsed$ which is time passed after last $CheckTime$ call, which returned true
+	\item $time\_elapsed$ which is time passed after last $Reset$ call
 	\item $periodic\_timer$
 \end{itemize}
 
-Let us introduce helping function $StartWaiting$ with the following logic:
+$Rest$ method has the following logic:
 \begin{itemize}
 	\item call $periodic\_timer.GetPassedTime()$ to fix point since which we are going to trace time
 	\item update $time\_elapsed = 0$
 \end{itemize}
 
-$StartWaiting$ should be called in the constructor of the class $WaitingTimer$, because we start waiting since the initialization of the object.
+$Reset$ should be called in the constructor of the class $WaitingTimer$.
 
 Function $CheckTime$ would have the following logic:
 \begin{itemize}
 	\item update $time\_elapsed += periodic\_timer.GetPassedTime()$
-	\item calculate boolean $is\_time\_elapsed = time\_elapsed > time\_period$
-	\item if $is\_time\_elapsed$ is true, call $StartWaiting$
-	\item return $is\_time\_elapsed$
+	\item return evaluated condition $time\_elapsed > time\_period$
 \end{itemize}
 
 Now our method $CheckTime$ acts if it was planned. However, it bears a unique caller requirement as far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} does.
