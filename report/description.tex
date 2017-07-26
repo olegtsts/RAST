@@ -688,6 +688,84 @@ And again we clearly see the advantages of lock-free queue:
 
 On the account of these simple measurements, we decided that it is better to use a lock-free algorithm.
 
+\subsection{Low-overhead periodic timer}
+
+In order to make the system more efficient, sometimes it is required to measure operations in order to distribute them ideally between different threads. However, a lot of calls to system timer would result in slower performance.
+
+The purpose of the current section is to establish easy-to-use time measuring algorithm, which will somehow not slow down the performance being called a lot of times in a short period of time. To simplify matters, let us construct a timer, which has $GetPassedTime$ function, which being called the first time, would return unix timestamp (time since year 1970), and being called further would return the time passed since its last call. This timer will not be thread-safe, it will be designed to be used in one thread only.
+
+Basically, the idea is simple: if we cannot access system clock on each call, be should access them more rarely, thus sometimes we will provide approximate results on $GetPassedTime$ call. On the contrary, sometimes on $GetPassedTime$ call we will call system clock and catch up or slow down depending on our previous not exact responses. That is, our not-so-exact timer needs to be winded up when we do access system clock.
+
+In order to do that let us introduce what information does such a timer store:
+\begin{itemize}
+	\item static constant $min\_system\_clock\_call\_period$ which is a minimal desired time, after which we want to call $WindUp$
+	\item static constant $max\_wind\_up\_steps$ which tells how many calls of $GetPassedTime$ at maximum should be until next wind-up
+	\item static constant $min\_measured\_time$ is a minimal value we would return from $GetPassedTime$ function
+	\item $wind\_up\_counter$ is a counter, which decreases on each $GetPassedTime$ call and being equal zero forces winding up process
+	\item $wind\_up\_balance$ is a difference between real time and sum of all times returned from $GetPassedTime$ during program execution
+	\item $last\_wind\_up\_counter$ stores the value of counter, which was set just after last wind-up
+	\item $last\_system\_time$ is system time measured while last wind up
+	\item $approx\_time\_step$ is an approximate value, which is a prognosis of time elapsed since previous $GetPassedTime$ call
+\end{itemize}
+
+The initial values of parameters would be the following:
+\begin{itemize}
+	\item $wind\_up\_counter = 1$
+	\item $wind\_up\_balance = 0$
+	\item $last\_wind\_up\_counter = 1$
+	\item $last\_system\_time = 0$
+	\item $approx\_time\_step$ will be initialized on first $GetPassedTime$ call, as it will be seen further
+\end{itemize}
+
+The $WindUp$ procedure would do the following:
+\begin{itemize}
+	\item store current system time in $system\_time$ variable
+	\item calculate $time\_passed = system\_time - last\_system\_time$
+	\item calculate $new\_wind\_up\_counter = max(1, \\min(min\_system\_clock\_call\_period / time\_passed * last\_wind\_up\_counter,\\ max\_wind\_up\_steps))$. That is, if $time\_passed$ is less than \\$min\_system\_clock\_call\_period$, we want to increase amount of calls we want to perform until next win-up by the ratio of these values. But, we do not want it to be more than $max\_wind\_up\_steps$ and less than 1.
+	\item update $approx\_time\_step = time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter$
+	\item update $last\_wind\_up\_counter = new\_wind\_up\_counter$ to store new last counter
+	\item update $wind\_up\_counter = last\_wind\_up\_counter$ to do next wind up after this amount of steps
+	\item update $last\_system\_time = system\_time$ to save result for future wind-up
+	\item update $wind\_up\_balance += time\_passed$ in order to maintain $wind\_up\_balance$ invariant
+\end{itemize}
+Now let us consider the following algorithm for $GetPassedTime$ operation:
+\begin{itemize}
+	\item decrease $wind\_up\_counter$
+	\item if $wind\_up\_counter$ equals zero, call $WindUp$ method
+	\item calculate $result\_time = max(min\_measured\_time, approx\_time\_step)$
+	\item update $wind\_up\_balance -= result\_time$ to maintain $wind\_up\_balance$ invariant
+	\item return $result\_time$
+\end{itemize}
+During the first $GetPassedTime$, $WindUp$ would be called immediately and will initialize $approx\_time\_step$, which has already beed stated. And the initialization of $approx\_time\_step$ appears before its first usage.
+
+Why is this supposed to be correct? First of all, imagine a situation when we call $GetPassedTime$ so rarely, that $time\_passed$ is large enough to be more than $min\_system\_clock\_call\_period$ and also more than $min\_measured\_time$, and $last\_wind\_up\_counter$ equals 1 and $wind\_up\_balance$ equals zero. Let us trace how parameters will be updated in $WindUp$ method:
+\begin{itemize}
+	\item store current system time in $system\_time$ variable
+	\item calculate $time\_passed = system\_time - last\_system\_time$
+	\item update $new\_wind\_up\_counter =\\= max(1, min(\\min\_system\_clock\_call\_period / time\_passed *\\* last\_wind\_up\_counter, max\_wind\_up\_steps)) =\\= max(1, min(0, max\_wind\_up\_steps)) = max(1, 0) = \\=1$.
+	\item update $approx\_time\_step = time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter = time\_passed / 1 + 0 / 1 =\\= time\_passed$
+	\item update $last\_wind\_up\_counter = new\_wind\_up\_counter = 1$
+	\item update $wind\_up\_counter = last\_wind\_up\_counter = 1$ so $WindUp$ would be called on next $GetPassedTime$ call
+	\item update $last\_system\_time = system\_time$ to save result for future wind-up
+	\item update $wind\_up\_balance += time\_passed$ so $wind\_up\_balance$ would equal $time\_passed$ now
+\end{itemize}
+This way, $last\_wind\_up\_counter$ continues to be equal 1 and next time the same calculations would also hold. Now let us consider what will happen in $GetPassedTime$ procedure:
+\begin{itemize}
+	\item decrease $wind\_up\_counter$
+	\item $wind\_up\_counter$ equals zero because it was being equal 1 before, so we definitely call $WindUp$ method
+	\item $wind\_up\_balance$ equals $time\_passed$, as well as $approx\_time\_step$ does
+	\item calculate $result\_time = max(min\_measured\_time, approx\_time\_step) =\\= max(min\_measured\_time, time\_passed) = time\_passed$, because we assumed that $time\_passed \geq min\_measured\_time$
+	\item update $wind\_up\_balance -= result\_time$, which makes $wind\_up\_balance$ being equal zero again.
+	\item return $result\_time$, which is equal to $time\_passed$
+\end{itemize}
+Thus, all values we assumed at the start ($last\_wind\_up\_counter = 1$, $wind\_up\_balance = 0$) would still remain the same after $GetPassedTime$ call. That is why, the same will repeat on the next $GetPassedTime$ call and it will always return correctly calculated precise $time\_passed$ result on each call. That is, in case of large enough $time\_passed$, our timer is equivalent to simple timer logic.
+
+Another important point is that in any case we are trying to make $wind\_up\_balance$ being equal zero. Indeed, we set $approx\_time\_step = time\_passed / last\_wind\_up\_counter +//+ wind\_up\_balance / new\_wind\_up\_counter$. Expression $time\_passed / last\_wind\_up\_counter$ evaluates to average time between $GetPassedTime$ previous calls. Expression \\$wind\_up\_balance / new\_wind\_up\_counter$ results in the fact, that during next $new\_wind\_up\_counter$ calls of $GetPassedTime$ we will, apart from main logic, decrease previous error $wind\_up\_balance$ to zero while updating $wind\_up\_balance -= result\_time$. Simultaneously, a new error, which the prognosis $time\_passed / last\_wind\_up\_counter$ poses, will also be accumulated while doing $wind\_up\_balance -= result\_time$, and it will be handled during the next $WindUp$ call, while we will count new $approx\_time\_step$.
+
+$wind\_up\_balance$ parameter is rather important. It shows our overall accumulated calculation errors and if it is a large negative number, it implies that the sum of returned times from $GetPassedTime$ dramatically exceeded real time pace, and $approx\_time\_step$ would be negative in such a case, forcing $result\_time$ we give out to be equal $min\_measured\_time$. In case if $wind\_up\_balance$ is a rather big positive number, we will return larger values from $GetPassedTime$ because of larger $approx\_time\_step$, which would help us to catch up with the time pace.
+
+Notice that $GetPassedTime$ is designed to be called exactly from one location in the code, because we use the fact that approximately same time passes between $GetPassedTime$ calls while calculating $time\_passed / last\_wind\_up\_counter$ as an expected virtual time step.
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
