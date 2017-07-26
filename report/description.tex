@@ -689,6 +689,7 @@ And again we clearly see the advantages of lock-free queue:
 On the account of these simple measurements, we decided that it is better to use a lock-free algorithm.
 
 \subsection{Low-overhead periodic timer}
+\label{subsec:low_overhead_periodic_timer}
 
 In order to make the system more efficient, sometimes it is required to measure operations in order to distribute them ideally between different threads. However, a lot of calls to system timer would result in slower performance.
 
@@ -765,6 +766,43 @@ Another important point is that in any case we are trying to make $wind\_up\_bal
 $wind\_up\_balance$ parameter is rather important. It shows our overall accumulated calculation errors and if it is a large negative number, it implies that the sum of returned times from $GetPassedTime$ dramatically exceeded real time pace, and $approx\_time\_step$ would be negative in such a case, forcing $result\_time$ we give out to be equal $min\_measured\_time$. In case if $wind\_up\_balance$ is a rather big positive number, we will return larger values from $GetPassedTime$ because of larger $approx\_time\_step$, which would help us to catch up with the time pace.
 
 Notice that $GetPassedTime$ is designed to be called exactly from one location in the code, because we use the fact that approximately same time passes between $GetPassedTime$ calls while calculating $time\_passed / last\_wind\_up\_counter$ as an expected virtual time step.
+
+\subsection{Low-overhead start-finish timer}
+
+Let us construct a timer, which would help to measure some code execution time. It would have $Start$ and $Finish$ methods, which are to be called before and after desired code block. Also it would have $GetCount$ method, which will return count of measurements, and $GetDurationSum$ method, which would return sum of all measured times. Moreover, there will be a $Reset$ method, which resets counters.
+
+In order to avoid slow performance due to a lot of system timer calls, we will use \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer}.
+
+Our timer object would store the following information:
+\begin{itemize}
+	\item $start\_timer$ which is a periodic timer associated with start event
+	\item $finish\_timer$ which is a periodic timer associated with finish event
+	\item $measurements\_counter$ which stores count of measurements
+	\item $duration\_sum$ which stores sum of all durations measured so far
+\end{itemize}
+
+Now let us consider, what methods do.
+
+Algorithm for $Start$ method:
+\begin{itemize}
+	\item decrease $duration\_sum$ by $start\_timer.GetPassedTime()$ (method $GetPassedTime$ is defined in the \hyperref[subsec:low_overhead_periodic_timer]{``low-overhead periodic timer''} section)
+\end{itemize}
+
+Algorithm for $Finish$ method
+\begin{itemize}
+	\item increase $duration\_sum$ by $finish\_timer.GetPassedTime()$
+	\item increase $measurements\_counter$
+\end{itemize}
+
+$GetCount$ method returns  $measurements\_counter$
+
+$GetDurationSum$ method returns $max(PerioicTimer::min\_measured\_time, duration\_sum)$.
+
+$Reset$ method reinitializes all parameters $start\_timer$, $finish\_timer$, $measurements\_counter$ and $duration\_sum$.
+
+The implementation here is very simple due to the fact that we have already passed through all the difficulties while building \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} algorithm.
+
+As far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} has a unique caller requirement (must be called from one specific location in the code), our $Start$ and $Finish$ methods also have the same requirement.
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
