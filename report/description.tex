@@ -768,6 +768,7 @@ $wind\_up\_balance$ parameter is rather important. It shows our overall accumula
 Notice that $GetPassedTime$ is designed to be called exactly from one location in the code, because we use the fact that approximately same time passes between $GetPassedTime$ calls while calculating $time\_passed / last\_wind\_up\_counter$ as an expected virtual time step.
 
 \subsection{Low-overhead start-finish timer}
+\label{subsec:low_overhead_start_finish_timer}
 
 Let us construct a timer, which would help to measure some code execution time. It would have $Start$ and $Finish$ methods, which are to be called before and after desired code block. Also it would have $GetCount$ method, which will return count of measurements, and $GetDurationSum$ method, which would return sum of all measured times. Moreover, there will be a $Reset$ method, which resets counters.
 
@@ -805,6 +806,7 @@ The implementation here is very simple due to the fact that we have already pass
 As far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} has a unique caller requirement (must be called from one specific location in the code), our $Start$ and $Finish$ methods also have the same requirement.
 
 \subsection{Low-overhead waiting timer}
+\label{subsec:low_overhead_waiting_timer}
 Here we are aiming to create a timer, which helps to schedule periodic actions. In constructor it accepts a time period value. It has $CheckTime$ function, which returns $true$ if given time passed, and $false$, if time have not passed yet. Also there would be a $Reset$ function, which resets waiting process from the start.
 
 As far as there can be a lot of $CheckTime$ calls in a short period of time, the good idea would be to use \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer}.
@@ -816,7 +818,7 @@ Our $WaitingTimer$ would contain the following variables:
 	\item $periodic\_timer$
 \end{itemize}
 
-$Rest$ method has the following logic:
+$Reset$ method has the following logic:
 \begin{itemize}
 	\item call $periodic\_timer.GetPassedTime()$ to fix point since which we are going to trace time
 	\item update $time\_elapsed = 0$
@@ -1160,6 +1162,56 @@ public:
 private:
 	std::vector<std::unique_ptr<Piper<>::EdgeProxy<GlobalPiper>>> edge_handers;
 	std::vector<std::unique_ptr<Piper<>::MessageProcessorProxy<GlobalPiper>>> message_processor_handlers;
+};
+\end{lstlisting}
+
+\subsection{Low-overhead timers}
+
+Let us outline classes and methods for three algorithms described above:
+\begin{itemize}
+	\item \hyperref[subsec:low_overhead_periodic_timer]{periodic timer}
+	\item \hyperref[subsec:low_overhead_start_finish_timer]{start-finish timer}
+	\item \hyperref[subsec:low_overhead_waiting_timer]{waiting timer}
+\end{itemize}
+
+\begin{lstlisting}
+class PeriodicTimer {
+private:
+	void WindUp() noexcept;
+public:
+	int64_t GetPassedTime() noexcept;
+private:
+	static const int64_t min_system_click_call_period;
+	static const int64_t max_wind_up_steps;
+	static const int64_t min_measured_time;
+	int64_t wind_up_counter;
+	int64_t wind_up_balance;
+	int64_t last_wind_up_counter;
+	int64_t last_system_time;
+	int64_t approx_time_step;
+};
+class StartFinishTimer {
+public:
+	void Start() noexcept;
+	void Finish() noexcept;
+	uint64_t GetCount() noexcept;
+	uint64_t GetDurationSum() noexcept;
+	void Reset();
+private:
+	PeriodicTimer start_timer;
+	PeriodicTimer finish_timer;
+	uint64_t measurements_counter;
+	uint64_t duration_sum;
+};
+class WaitingTimer {
+public:
+	WaitingTimer(const uint64_t time_period) noexcept;
+	bool CheckTime() noexcept;
+	void Reset() noexcept;
+private:
+	uint64_t time_period;
+	int64_t time_elapsed;
+	PeriodicTimer periodic_timer;
 };
 \end{lstlisting}
 
