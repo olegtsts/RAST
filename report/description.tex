@@ -22,6 +22,7 @@
 \usepackage{a4wide}
 \usepackage{verbatim}
 \usepackage{hyperref}
+\usepackage{nameref}
 \hypersetup{
     colorlinks,
     citecolor=black,
@@ -49,6 +50,7 @@
 		  tabsize=3,
                 morecomment=[l][\color{magenta}]{\#}
 }
+\newcommand*{\fullref}[1]{\hyperref[{#1}]{\ref*{#1}. \nameref*{#1}}}
 \begin{document}
 
 %\begin{center} \hyperlink{debug}{\Huge{DEBUG}}\end{center}
@@ -197,7 +199,7 @@ That we have basically done here is incrementing ``inheritance\_level\_index'' i
 \subsection{Reverse template instantiation}
 \label{subsec:reverse_template_instantiation}
 
-In the section about \hyperref[subsec:specifications_cascade_merging]{specifications merging} we have learned how to access data inside specific inherited class in the inheritance chain by given type name. Now assume the inverse task: given class $X<A,B,C>$ we want it to have a function Output(const int n) which calls ``Output'' function of $n-th$ class. That is, $Output(0)$ calls $C::Output$, $Output(1)$ calls $B::Output$, etc.
+In the section \fullref{subsec:specifications_cascade_merging} we have learned how to access data inside specific inherited class in the inheritance chain by given type name. Now assume the inverse task: given class $X<A,B,C>$ we want it to have a function Output(const int n) which calls ``Output'' function of $n-th$ class. That is, $Output(0)$ calls $C::Output$, $Output(1)$ calls $B::Output$, etc.
 
 First and the simplest idea would be to do recursive calls until reaching needed inheritance level, and afterwards call the required ``Output'' function:
 \begin{lstlisting}
@@ -513,7 +515,7 @@ The detailed version of Pop consists of the following steps:
 %\begin{center} \hypertarget{debug}{\Huge{DEBUG}}\end{center}
 Notice that Pop is exception-free.
 
-The implementation described here does not do deallocations, which poses a memory leak problem. The problem is handled \hyperref[subsec:dealloc_lock_free_queue]{here}.
+The implementation described here does not do deallocations, which poses a memory leak problem. The problem is handled in the forthcoming section \fullref{subsec:dealloc_lock_free_queue}.
 
 \subsection{Multi-counters deallocation technique}
 \label{subsec:three_counters}
@@ -568,7 +570,7 @@ There are also a few rather important details about the implementation:
 \subsection{Multi-counters lock-free queue (final algorithm)}
 \label{subsec:dealloc_lock_free_queue}
 
-Here we are to combine the ideas in \hyperref[subsec:lock_free_queue]{the section about lock-free-queue} and \hyperref[subsec:three_counters] {the section about multi-counters deallocation}.
+Here we are to combine the ideas in \fullref{subsec:lock_free_queue} and \fullref{subsec:three_counters}.
 
 Now the node of the queue is going to contain its $internal\_counter$ and $external\_counters$. In the queue we also need several atomic variables, which point to the nodes: head, tail and next. Let the head, tail and next be objects, which contain $external\_counter$ and a pointer to the node.
 
@@ -772,7 +774,7 @@ Notice that $GetPassedTime$ is designed to be called exactly from one location i
 
 Let us construct a timer, which would help to measure some code execution time. It would have $Start$ and $Finish$ methods, which are to be called before and after desired code block. Also it would have $GetCount$ method, which will return count of measurements, and $GetDurationSum$ method, which would return sum of all measured times. Moreover, there will be a $Reset$ method, which resets counters.
 
-In order to avoid slow performance due to a lot of system timer calls, we will use \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer}.
+In order to avoid slow performance due to a lot of system timer calls, we will use \fullref{subsec:low_overhead_periodic_timer}.
 
 Our timer object would store the following information:
 \begin{itemize}
@@ -786,7 +788,7 @@ Now let us consider, what methods do.
 
 Algorithm for $Start$ method:
 \begin{itemize}
-	\item decrease $duration\_sum$ by $start\_timer.GetPassedTime()$ (method $GetPassedTime$ is defined in the \hyperref[subsec:low_overhead_periodic_timer]{``low-overhead periodic timer''} section)
+	\item decrease $duration\_sum$ by $start\_timer.GetPassedTime()$ (method $GetPassedTime$ is defined in the \fullref{subsec:low_overhead_periodic_timer} section)
 \end{itemize}
 
 Algorithm for $Finish$ method
@@ -801,15 +803,15 @@ $GetDurationSum$ method returns $max(PerioicTimer::min\_measured\_time, duration
 
 $Reset$ method reinitializes all parameters $start\_timer$, $finish\_timer$, $measurements\_counter$ and $duration\_sum$.
 
-The implementation here is very simple due to the fact that we have already passed through all the difficulties while building \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} algorithm.
+The implementation here is very simple due to the fact that we have already passed through all the difficulties while building \fullref{subsec:low_overhead_periodic_timer} algorithm.
 
-As far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} has a unique caller requirement (must be called from one specific location in the code), our $Start$ and $Finish$ methods also have the same requirement.
+As far as \fullref{subsec:low_overhead_periodic_timer} has a unique caller requirement (must be called from one specific location in the code), our $Start$ and $Finish$ methods also have the same requirement.
 
 \subsection{Low-overhead waiting timer}
 \label{subsec:low_overhead_waiting_timer}
 Here we are aiming to create a timer, which helps to schedule periodic actions. In constructor it accepts a time period value. It has $CheckTime$ function, which returns $true$ if given time passed, and $false$, if time have not passed yet. Also there would be a $Reset$ function, which resets waiting process from the start.
 
-As far as there can be a lot of $CheckTime$ calls in a short period of time, the good idea would be to use \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer}.
+As far as there can be a lot of $CheckTime$ calls in a short period of time, the good idea would be to use \fullref{subsec:low_overhead_periodic_timer}.
 
 Our $WaitingTimer$ would contain the following variables:
 \begin{itemize}
@@ -832,13 +834,14 @@ Function $CheckTime$ would have the following logic:
 	\item return evaluated condition $time\_elapsed > time\_period$
 \end{itemize}
 
-Now our method $CheckTime$ acts if it was planned. However, it bears a unique caller requirement as far as \hyperref[subsec:low_overhead_periodic_timer]{low-overhead periodic timer} does.
+Now our method $CheckTime$ acts if it was planned. However, it bears a unique caller requirement as far as \fullref{subsec:low_overhead_periodic_timer} does.
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
 \subsection{TLS free-list multi-level allocator}
 
-The class implements the allocation logic described \hyperref[free_list_algo]{here}.
+The class implements the allocation logic described in the section \fullref{free_list_algo}.
 
 \begin{lstlisting}
 class FreeListMultiLevelAllocator {
@@ -899,7 +902,7 @@ class FixedFreeListMultiLevelAllocator<T> {
 
 \subsection{Lock-free queue}
 
-$LockFreeQueue<TElement>$ is an implementation of lock-free queue described \hyperref[subsec:dealloc_lock_free_queue]{here}. It contains the following functions:
+$LockFreeQueue<TElement>$ is an implementation of lock-free queue described in the section \fullref{subsec:dealloc_lock_free_queue}. It contains the following functions:
 
 \begin{lstlisting}
 class LockFreeQueue<TElement> {
@@ -975,7 +978,7 @@ Moreover, this class provides an opportunity to access distinct message processo
 
 Hence, this is  a generic structure which controls message passing process and provides access by indices, which simplifies further programming.
 
-The structure here is rather complicated and based on the \hyperref[subsec:specifications_cascade_merging]{specifications cascade merging} and \hyperref[subsec:reverse_template_instantiation]{reverse template instantiation} patterns.
+The structure here is rather complicated and based on the \fullref{subsec:specifications_cascade_merging} and \fullref{subsec:reverse_template_instantiation} patterns.
 
 First of all, there is a zero-template very-base class $Piper<>$ definition:
 \begin{lstlisting}
@@ -1169,9 +1172,9 @@ private:
 
 Let us outline classes and methods for three algorithms described above:
 \begin{itemize}
-	\item \hyperref[subsec:low_overhead_periodic_timer]{periodic timer}
-	\item \hyperref[subsec:low_overhead_start_finish_timer]{start-finish timer}
-	\item \hyperref[subsec:low_overhead_waiting_timer]{waiting timer}
+	\item \fullref{subsec:low_overhead_periodic_timer}
+	\item \fullref{subsec:low_overhead_start_finish_timer}
+	\item \fullref{subsec:low_overhead_waiting_timer}
 \end{itemize}
 
 \begin{lstlisting}
@@ -1214,6 +1217,5 @@ private:
 	PeriodicTimer periodic_timer;
 };
 \end{lstlisting}
-
 \end{document}
 
