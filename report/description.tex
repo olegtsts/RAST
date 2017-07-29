@@ -836,6 +836,37 @@ Function $CheckTime$ would have the following logic:
 
 Now our method $CheckTime$ acts if it was planned. However, it bears a unique caller requirement as far as \fullref{subsec:low_overhead_periodic_timer} does.
 
+\subsection{Shadow-paging thread-wise sharder}
+\label{subsec:shadow_page_thread_wise_sharder}
+
+Sometimes it is needed to distribute some job between threads. Here we assume that we have a one big job, which can be represented as a composition of several small operations, which we will call ``shards''. Basically, shard is rather a dataset, which is associated with some actions. For instance, shard may be an index of a large vector, which we want to process in parallel. $Sharder$ itself is not the owner of the implementations of actions, which shards are associated with.
+
+The basic purpose of $Sharder$ would be to distribute shards among threads. Notice that $Sharder$ is not only about an algorithm for distribution of shards, it is more about thread-safe infrastructure for sharding process.
+
+To sum up, $Sharder$ has the following responsibilities:
+\begin{itemize}
+	\item guaranteeing read-write lock on shards data. That is, if some shard is being modified, nobody should read it at this point
+	\item assigning a group of shards to each thread
+	\item giving away information about which shards belong to which thread
+	\item doing $Reshard$ process by forming new configuration of sharding by means of shadow paging
+\end{itemize}
+
+To avoid several race condition problems, it would be much easier to allow $Reshard$ call only from main thread. Still there are some difficulties remained. We are going to do $Reshard$ by looking at current state of shards and deciding how to redistribute them. However, while $Reshard$ operation is reading shards info, it can be updated by any of the other threads. This poses a risk of data race condition. In order to avoid it, let us introduce $NoUpdatePromise$ method. Such a method would help to establish $Reshard$ basic requirement: resharding is possible if and only if all threads stopped to update shards and called $NoUpdatePromise$. After that, we may safely read current shards info and decide how to reshard them. Afterwards, all threads should start to use new sharding configuration. And again, if there would be a need in another resharding, all threads must promise not to update current state of shards.
+
+More than that, there is another race condition. After resharding, threads are going to switch to another sharding configuration, and during switching it is highly likely that thread, which finishes to use old sharding configuration, and a thread, which has already started to use new sharding configuration, may read-write the same shard:
+
+\begin{center}\includegraphics[width=0.5 \textwidth]{image6.png}\end{center}
+
+In the picture above we may see two configurations. Old configuration shows that shards 0 and 1 belong to thread 1 and shards 2 and 3 belong to thread 2. Next resharded configuration show that shards 0 and 2 belong to thread 1, shards 1 and 3 belong to thread 2. While thread 2 is still using old configuration 1, thread 1 may have already switched to configuration 2. In this very moment thread 1 may start to write updates to shard 2 data, while thread 2 is still reading shard 2, which is a data race.
+
+In order to avoid this, we will use mutexes. Mutexes will be locked and released only during $Reshard$ process, which would take place rarely, that is why we do not need to bother about mutexes being slow. More precisely, each shard would be associated with a single mutex. When switching to new sharding configuration, thread releases all the mutexes associated with shards, afterwards acquiring all mutexes associated with shards of new configuration.
+
+In the example above, thread 1 cannot switch to the new configuration, because it waits mutex associated with shard 2, which is held by thread 2 processing old configuration. Only after thread 2 stops to work with an old configuration, thread 1 may freely start to work with new one.
+
+Mutexes associated with shards help us to solve data races different threads may create. However, another possible problem arises, which is a deadlock. Fortunately, we do not suffer from this problem. Indeed, the only point where a thread A waits is a point when it tries to lock mutex associated with some specific shard during configuration changing, that is, some other thread B locked that mutex. If thread B has already switched to new sharding configuration, it cannot lock the same shard as thread A, thus such condition is impossible. If thread B still uses old configuration, it is going to switch to a new one and release its locks, stopping to block thread A. That is, we will never have a case of a deadlock.
+
+After coping with all possible algorithmic problems, let us look deeper into the details of how resharding happens. First of all, it is about building a new sharding configuration with shadow paging technique. In order to do that, let us have to variables $first\_conf$ and $second\_conf$, which may store configurations. There will also be a boolean constant $is\_first\_main$, which being $true$ implies, that main configuration is stored in $first\_conf$ and its update will be placed in $second\_conf$, and being $false$ implies vise versa.
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
