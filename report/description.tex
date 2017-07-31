@@ -969,8 +969,8 @@ $ThreadAction$ is a function which would be assigned to threads. It accepts $thr
 	\item set TLS variable $thread\_num$ to the value it accepted from caller
 	\item start an infinite cycle
 	\item call $GetShardGroup$ and store value to $group$ variable
-	\item call $ProcessShardGroup(group.can\_be\_updated, group.data)$
-	\item for each shard in group calls $ProcessShard(group.can\_be\_updated, shard.data, group.data)$
+	\item call $ProcessShardGroup(group.can\_be\_updated, group.data)$, wrapping exceptions with retries
+	\item for each shard in group calls $ProcessShard(group.can\_be\_updated, shard.data, group.data)$, wrapping exceptions with retries
 	\item if $reshard\_waiting\_timer.CheckTime()$ returns $true$, time for resharding has come. We have to call $NoUpdatePromise$ and $Reshard$.
 \end{itemize}
 
@@ -982,6 +982,13 @@ Let us also outline the requirements to $ShardData$ and $ShardGroupData$:
 	\item however, for the reason that shards are protected with mutex, $ShardData$ of each single shard may contain external links and operate with external not-thread-safe data
 	\item $ShardGroupData$ cannot manipulate with references to external not-thread-safe data at all, because it is not protected with mutexes.
 	\item $ShardData$ and $ShardGroupData$ may store any inner not-thread-safe data with no negative effect, because new shards and new shard groups are constructed over shadow page of sharding configuration
+	\item since we are retrying $ProcessShardGroup$ and $ProcessShard$ functions, they must provide at least basic exception safety
+\end{itemize}
+
+Exception requirements:
+\begin{itemize}
+	\item $InitialShardCallback$ may throw, should provide basic exception safety
+	\item $ReshardCallback$ should not throw
 \end{itemize}
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
@@ -1362,6 +1369,92 @@ private:
 	uint64_t time_period;
 	int64_t time_elapsed;
 	PeriodicTimer periodic_timer;
+};
+\end{lstlisting}
+\subsection{Shadow-paging thread-wise sharder interface}
+Here we are to outline classes and methods required for $Sharder$, which is described in the section \fullref{subsec:shadow_page_thread_wise_sharder}
+
+Here are how helper classes look:
+\begin{lstlisting}
+template <typename ShardData>
+class Shard {
+	void Lock() noexcept;
+	// Although lock of the mutex can throw,
+	// it does throw in cases if our thread has
+	// no permissions to lock mutex, or if
+	// a deadlock is detected.
+	// We treat both cases as being impossible
+
+	void Unlock() noexcept;
+public:
+	ShardData data;
+private:
+	mutable std::mutex mu;
+};
+
+template <typename ShardData, typename ShardGroupData>
+class ShardGroup {
+public::
+	bool can_be_updated;
+	ShardGroupData data;
+	std::vector<Shard<ShardData>> shards;
+};
+
+template <typename ShardData, typename ShardGroupData>
+class ShardingConfiguration {
+public:
+	std::vector<ShardGroup<ShardData, ShardGroupData> shard_groups;
+};
+\end{lstlisting}
+
+Now let us define $Sharder$ class itself:
+\begin{lstlisting}
+struct ShadowCounter {
+	bool is_first_main;
+	unsigned noupdate_counter:7;
+};
+
+template <typename ShardData, typename ShardGroupData>
+class Sharder {
+public:
+	using Conf = ShardingConfiguration<ShardData, ShardGroupData>;
+
+	template <typename TInitializeFunc>
+	Sharder(TInitializeFunc initial_shard_callback);
+	// Constructor may throw, basic exception safety
+
+	Conf& GetConf(bool is_first) noexcept;
+
+	template <typename TReshardFunc>
+	void Reshard(TReshardFunc reshard_callback) noexcept;
+	// Required reshard_callback to not throw
+
+	void NoUpdatePromise() noexcept;
+
+	ShardGroup& GetShardGroup() noexcept;
+
+	void SwitchConfiguration() noexcept;
+
+	template <typename TProcessShardFunc, typename TProcessShardGroupFunc, typename TReshardFunc>
+	void ThreadAction(const int thread_num, TProcessShardFunc process_shard,
+		TProcessShardGroupFunc process_shard_group, TReshardFunc reshard) noexcept;
+	// Inside we have to catch exceptions, though
+
+	template <typename TProcessShardFunc, typename TProcessShardGroupFunc, typename TReshardFunc>
+	void Run(TProcessShardFunc process_shard, TProcessShardGroupFunc process_shard_group,
+		TReshardFunc reshard) noexcept;
+	// Thread launching may throw, but if it does, we cannot do anything better than to terminate
+	// That is why we mark function as noexcept
+private:
+	Conf first_conf;
+	Conf second_conf;
+	int threads_count;
+	ShadowCounter shadow_counter;
+	std::vector<std::thread> threads;
+
+	static thread_local bool is_first_local;
+	static thread_local int thread_num;
+	static thread_local WaitingTimer reshard_waiting_timer;
 };
 \end{lstlisting}
 \end{document}
