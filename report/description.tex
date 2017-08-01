@@ -848,10 +848,11 @@ The logic part is going to be processed by any user-provided class $Controller$,
 $Controller$ class would have the following methods:
 \begin{itemize}
 	\item $ProcessShard(can\_be\_updated, shard\_num)$ which processes actions of shard $shard\_num$ ($can\_be\_updated$ specifies whether $Controller$ can update information of shard, which is used for resharding)
-	\item $PreProcesss(can\_be\_updated)$ which is called from $Sharder$ before processing shards
-	\item $OnSwitch(new\_shards)$ which is called by $Sharder$ when a thread started to work with new shards after resharding. A new shards vector is passed to it.
+	\item $PreProcess(thread\_num, can\_be\_updated)$ which is called from $Sharder$ before processing shards
+	\item $OnSwitch(thread\_num, new\_shards)$ which is called by $Sharder$ when a thread started to work with new shards after resharding. A new shards vector is passed to it.
 	\item $GetInitialSharding(thread\_count)$, which returns vector of vector of numbers of shards
 	\item $GetResharding(old\_shard\_configuration, thread\_count)$, where $old\_shard\_configuration$ is a current vector of vector of shards, and the function should return new vector of vector of shards
+	\item $GetMaxThreadCount$ returns maximum amount of threads needed
 \end{itemize}
 
 Implementation of $Controller$ class is user-specific, since that we will not discuss any possible implementation of $Controller$ in this section.
@@ -861,7 +862,7 @@ $Sharder<Controller>$ has the following responsibilities:
 	\item guaranteeing read-write lock on shards data. That is, if some shard data is being modified, nobody should read it at this point
 	\item assigning a group of shards to each thread
 	\item doing $Reshard$ process periodically by forming new configuration of sharding by means of shadow paging
-	\item call $ProcessShard$, $PreProcesss$ and $OnSwitch$ functions to process shards actions
+	\item call $ProcessShard$, $PreProcess$ and $OnSwitch$ functions to process shards actions
 \end{itemize}
 
 To avoid several race condition problems, it would be much easier to allow $Reshard$ call only from main thread. Still there are some difficulties remained. We are going to do $Reshard$ by looking at current state of shards and deciding how to redistribute them. However, while $Reshard$ operation is reading shards info, it can be updated by any of the other threads. This poses a risk of data race condition. In order to avoid it, let us introduce $NoUpdatePromise$ method. Such a method would help to establish $Reshard$ basic requirement: resharding is possible if and only if all threads stopped to update shards data and called $NoUpdatePromise$. After that, we may safely read current shards data and decide how to reshard them. Afterwards, all threads should start to use new sharding configuration. And, if there would be a need in another resharding, all threads must again promise not to update current state of shards.
@@ -882,7 +883,7 @@ After coping with algorithmic problems, let us turn to the implementation issues
 
 $Sharder<Controller>$ contains the following variables:
 \begin{itemize}
-	\item $controller$ of type $Controller$
+	\item $controller$ of type $Controller\&$
 	\item $first\_conf$ is a vector of vector of shards
 	\item $second\_conf$ is a vector of vector of shards
 	\item $can\_be\_updated$ (TLS) boolean variable, which specifies if shard data can be modified by $controller$ object
@@ -897,12 +898,14 @@ $Sharder<Controller>$ contains the following variables:
 
 Data of $Sharder$ is initialized the following way:
 \begin{itemize}
-	\item $threads\_count$ is initialized as maximum hardware concurrency
+	\item $controller$ is initialized by reference, passed to constructor
+	\item $threads\_count$ is initialized as minimum of two values: maximum hardware concurrency and $coltronller.GetMaxThreadCount()$
 	\item $(is\_first\_main, noupdate\_counter) = (true, 0)$
 	\item $first\_conf$ is initialized by call to $controller.GetInitialSharding(thread\_count)$
 	\item $second\_conf$ is initialized by default
 	\item $threads$ is initialized as an empty vector
 	\item $shard\_locks$ is initialized as a vector of size being equal to shards count
+	\item for each $thread\_num$ call $controller.OnSwitch(thread\_num, first\_conf[thread\_num])$
 \end{itemize}
 
 $Sharder$ would have the following methods:
@@ -921,7 +924,8 @@ $Reshard$ method has the following algorithm:
 	\item if it is called not from main thread, do nothing
 	\item read $(is\_first\_main, noupdate\_counter)$ pair
 	\item if $noupdate\_counter$ is less than $threads\_count$, do nothing. Otherwise, there is a need for resharding
-	\item call $controller.GetResharding(GetConf(is\_first\_main), thread\_count)$ and assign its result to $GetConf(!is\_first\_main)$
+	\item call $controller.GetResharding(GetConf(is\_first\_main), thread\_count)$ catching exceptions
+	\item is no exceptions caught, assign result to $GetConf(!is\_first\_main)$, return doing nothing otherwise
 	\item try CAS $(is\_first\_main, noupdate\_counter)$ ($(cur\_first\_main, threads\_count) \rightarrow (!cur\_first\_main, 0)$) and do nothing on CAS failure
 	\item call $reshard\_waiting\_timer.Reset()$ on CAS success
 \end{itemize}
@@ -945,7 +949,7 @@ $SwitchConfiguration$ procedure does the following:
 	\item for all shards in $GetConf(is\_first\_main)[thread\_num]$ call $lock$ for the corresponding mutex from $shard\_locks$ vector
 	\item update $is\_first\_local = is\_first\_main$
 	\item set $can\_be\_updated$ to $true$.
-	\item call $controller.OnSwitch(GetConf(ls\_first\_local)[thread\_num])$
+	\item call $controller.OnSwitch(thread\_num, GetConf(ls\_first\_local)[thread\_num])$
 \end{itemize}
 
 $ThreadAction$ is a function which would be assigned to threads. It accepts $thread\_num$ and does the following:
@@ -953,7 +957,7 @@ $ThreadAction$ is a function which would be assigned to threads. It accepts $thr
 	\item set TLS variable $thread\_num$ to the value it accepted from caller
 	\item start an infinite cycle
 	\item call $GetShards$ and store value to $shards$ variable
-	\item call $controller.PreProcesss(can\_be\_updated)$, wrapping exceptions with retries
+	\item call $controller.PreProcess(thread\_num, can\_be\_updated)$, wrapping exceptions with retries
 	\item for each shard in $shards$ call $controller.ProcessShard(can\_be\_updated, shard\_num)$, wrapping exceptions with retries
 	\item if $reshard\_waiting\_timer.CheckTime()$ returns $true$, time for resharding has come. We have to call $NoUpdatePromise$ and $Reshard$.
 \end{itemize}
@@ -965,21 +969,148 @@ Let us also outline the algorithmic and exception requirements to $controller$.
 First of all, the algorithmic requirements:
 \begin{itemize}
 	\item $ProcessShard(can\_be\_updated, shard\_num)$ should manipulate with external not-thread-safe data only if a data is uniquely specified by $shard\_num$ and there is no intersection between different $shard\_num$'s data. Function cannot update such data in case if $can\_be\_updated$ is $false$.
-	\item $PreProcesss$ cannot manipulate with external not-thread-safe data at all, because it is not protected with mutexes.
+	\item $PreProcess$ cannot manipulate with external not-thread-safe data at all, because it is not protected with mutexes.
 	\item $GetResharding$ can safely read all data associated with shards, which was updated during $ProcessShard$ calls. It is also safe to assume, that no other thread calls $OnSwitch$ until $GetResharding$ finishes. That is because before $GetResharding$ call all threads promised not to update current shards info, which means that they are already using current shard configuration and not going to switch until CAS, which goes after $GetResharding$.
-	\item while implementing $OnSwitch(new\_shards)$ it is safe to assume, that each shard of $new\_shards$ is not processed by any thread until $OnSwitch$ completion. That is because before calling $OnSwitch$, we locked the shards in the current thread, but have not started to process them yet. It is also safe to assume, that main thread is not processing function $GetResharding$ until $OnSwitch$ completion, for the reason that otherwise $OnSwitch$ is processed at the same time as $GetResharding$ is processing, which is impossible as it has been stated above.
+	\item while implementing $OnSwitch(thread\_num, new\_shards)$ it is safe to assume, that each shard of $new\_shards$ is not processed by any thread until $OnSwitch$ completion. That is because before calling $OnSwitch$, we locked the shards in the current thread, but have not started to process them yet. It is also safe to assume, that main thread is not processing function $GetResharding$ until $OnSwitch$ completion, for the reason that otherwise $OnSwitch$ is processed at the same time as $GetResharding$ is processing, which is impossible as it has been stated above.
 \end{itemize}
 
 The exception requirements:
 \begin{itemize}
 	\item $ProcessShard$ may throw, should provide at least basic exception safety
-	\item $PreProcesss$ may throw, should provide at least basic exception safety
+	\item $PreProcess$ may throw, should provide at least basic exception safety
 	\item $OnSwitch$ should not throw
 	\item $GetInitialSharding$ may throw, should provide basic exception safety (however, any reasonable implementation would not throw anyway)
-	\item $GetResharding$ should not throw
+	\item $GetResharding$ may throw, should provide at least basic exception safety
+	\item $GetMaxThreadCount$ may throw, should provide at least basic exception safety
 \end{itemize}
 
-\subsection{}
+\subsection{Dynamically-sharded message passing}
+
+In the section \fullref{subsec:shadow_page_thread_wise_sharder} we have discussed how to shard a job. However, what remained uncovered is how to separate some job into shards and how to do resharding process. In case of a uniform job, for example, calling function $Func$ for each element of some vector, the question of how to shard a job is rather simple. When a job is complicated, it can usually be represented as several distinct logic blocks, some of which use results of some other logical blocks and together they form a full algorithm. That is called a ``message passing''. We would have several distinct message processors, which can accept messages, process them, and send messages to another message processors.
+
+In message passing, a shard would be associated with a message processor. All message processors can be called in different threads if we use thread-safe queue for communication between message processor (sending message processor may be processed in one thread, while receiving message processor may be processed in another thread, which is why we have to use thread-safe queue).
+
+Let us use a queue from the section \fullref{subsec:dealloc_lock_free_queue}.
+
+For thread-safe processing of sharding mechanism, let us use \fullref{subsec:shadow_page_thread_wise_sharder}. It requires shards being associated with integer numbers, which is why we would need some technical coding pattern to map message processor class names into integer numbers. The full idea of how to cope with it is described in \fullref{subsec:specifications_cascade_merging} and \fullref{subsec:reverse_template_instantiation} and a detailed implementation is discussed in \fullref{subsec:message_passing_tree}.
+
+Here we will assume we already know how to map message processor to its integer index and vise versa.
+
+What remains is to define $Controller$ class, which is required in order to use \fullref{subsec:shadow_page_thread_wise_sharder}. Let this class be called $MessagePassingController$.
+
+It would store the following information:
+\begin{itemize}
+	\item $message\_passing\_tree$ is an instance of $MessagePassingTree$ class designed in the section \fullref{subsec:message_passing_tree}. $MessagePassingTree$ helps to match message passing queues and message processors with their indices.
+	\item $message\_wait\_cvs$ is a vector of condition variables. $message\_wait\_cvs$ contains condition variables by a thread number. These condition variables would help to know when message passing queues are not empty. This vector is initialized in the constructor and never changes.
+	\item $message\_send\_cvs$ is a vector of pointers on same condition variables, indexed by outgoing message passing queues. It would help to notify condition variables on sending messages. The vector has to be rebuilt on each resharding.
+	\item $are\_queues\_empty$ (TLS) boolean variable which specifies whether incoming message queues have been empty on previous step
+	\item static constant $wait\_for\_messages\_time$ which specifies how much time a thread waits for message passing queues not to be empty in case all queues was empty at the previous step
+	\item vector $message\_processor\_timers$ of $StartFinishTimer$ instances for each message processor
+	\item vector $edges\_timers$ of $StartFinishTimer$ instances for each queue.
+\end{itemize}
+
+Now let us turn to the implementation of $Controller$ required functions.
+
+$GetMaxThreadCount$ does the following:
+\begin{itemize}
+	\item returns total number of message processors, which we can get using\\
+		$message\_passing\_tree.GetMessageProcessorsCount()$
+\end{itemize}
+
+$PreProcess(thread\_num, can\_be\_updated)$ does the following:
+\begin{itemize}
+	\item if $are\_queues\_empty$ is true, waits for $wait\_for\_messages\_time$,\\
+		interrupting on $message\_wait\_cvs[thread\_num]$ condition variable notification. We will use dumb lock instead of mutex while waiting for condition variable as far as there would be nothing terrible if we miss a wake, because we wait for it a very limited amount of time. Condition variable is needed here merely to interrupt waiting earlier if possible.
+	\item sets $are\_queues\_empty$ to $true$
+\end{itemize}
+
+$ProcessShard(can\_be\_updated, shard\_num)$ does the following:
+\nopagebreak
+\begin{itemize}
+	\item if $can\_be\_updated$ is $true$, calls $message\_processor\_timers[shard\_num].Start()$
+	\item using $message\_passing\_tree$ calls $Ping$ method for message processors with index $shard\_num$
+	\item if $can\_be\_updated$ is $true$, calls $message\_processor\_timers[shard\_num].Finish()$
+	\item gets all incoming queues indices using \\
+		$message\_passing\_tree.GetIncomingEdges(shard\_num)$
+	\item if $can\_be\_updated$ is $true$ for each index $queue\_index$ calls \\
+		$edges\_timers[queue\_index].Start()$
+	\item calls $message\_passing\_tree.GetEdgeProxy(queue\_index).NotifyAboutMessage()$
+	\item if $can\_be\_updated$ is $true$ calls $edges\_timers[queue\_index].Finish()$
+	\item if any message passing queue was not empty, sets $are\_queues\_empty$ to $false$
+\end{itemize}
+
+Additional helper function $SetSenderCVs$ would accept vector of vector of shards and do the following:
+\begin{itemize}
+	\item calculate max queue index by $message\_passing\_tree.GetEdgesCount()$
+	\item for all indices $cur\_queue\_index$ get receiver index by calling\\
+		$message\_passing\_tree.GetEdgeProxy(cur\_queue\_index).GetToIndex()$
+	\item find out a number of thread $thread\_num$, which is going to process this receiver
+	\item save pointer to condition variable $message\_wait\_cvs[thread\_num]$ \\ to the location $message\_send\_cvs[cur\_queue\_index]$
+\end{itemize}
+
+$GetInitialSharding(thread\_count)$ does the following:
+\begin{itemize}
+	\item gets a total number of message processors from \\
+		$message\_passing\_tree.GetMessageProcessorsCount()$ and distributes them among threads by modulo, returning required vector of vectors
+	\item calls $SetSenderCVs$ passing vector of vector of shards
+\end{itemize}
+
+$OnSwitch(thread\_num, new\_shards)$ does the following:
+\begin{itemize}
+	\item for each $new\_shard$ in $new\_shards$ calls \\
+		$message\_passing\_tree.GetOutgoingEdges(new\_shard)$ to get outgoing queues indices
+	\item for all outgoing queues sets condition variable of queue (by calling $SetConditionVariable$ method) to $message\_send\_cvs[outgoing\_queue\_index]$. As far as no $ProcessShard$ on any current message processor is processing, we may safely update condition variables of outgoing queues facing no data races.
+	\item calls $Reset$ method for all timers in $message\_processor\_timers$ and $edge\_timers$
+\end{itemize}
+
+In order to define $GetResharding$ procedure, let us introduce several local variables it is going to use:
+\begin{itemize}
+	\item $chosen\_processors$ is a vector of message processor indices chosen to be processed by current thread we consider
+	\item $chosen\_duration$ is a sum of durations of $Ping$ and $Receive$ calls of chosen message processors
+	\item $durations$ is a set of pairs $(duration, message\_processor\_index)$ where $duration$ is a sum of durations of $Ping$ and $Receive$ calls of a corresponding message processor with index $message\_processor\_index$
+	\item $passing\_durations$ is a hashmap, which by $message\_processor\_index$ stores sum of durations of $Receive$ methods, associated with edges connecting message processor with index $message\_processor\_index$ with message processors from $chosen\_processors$
+\end{itemize}
+
+Let us introduce helping procedure $ChoozeProcessor$ which accepts all variables defined above ass well as a pair $(duration, message\_processor\_index)$ and is going to add a \\
+$message\_processor\_index$ to $chosen\_processors$ and update all the variables listed the following way:
+\begin{itemize}
+	\item increment $chosen\_duration$ by $duration$
+	\item delete pair $(duration, message\_processor\_index)$ from $durations$
+	\item for each $other\_message\_processor\_index$ remained in $durations$ pairs find index of edges between message processor with index $message\_processor\_index$ and message processor with index $other\_message\_processor\_index$ by the call to \\
+		$message\_passing\_tree.GetConnectingEdges$
+	\item for each found $edge\_index$ increment \\
+		$passing\_durations[other\_message\_processor\_index]$ by the result of \\
+		$edge\_timers[edge\_index].GetDurationSum()$ call
+\end{itemize}
+
+$GetResharding(shard\_configuration, thread\_count)$ does the following:
+\begin{itemize}
+	\item calculates sum of all $GetDurationSum$ values from times in $message\_processor\_timers$ and in $edge\_timers$ as well
+	\item divides sum by $thread\_count$ and saves result to local variable $avg\_duration$
+	\item initializes $durations$ as set of pairs $(duration, message\_processor\_index)$,\\
+		where $duration$ is sum of the result of \\
+		$message\_processor\_timers[message\_processor\_index].GetDurationSum()$ call
+		and the result of \\
+		$edge\_timers[edge\_index].GetDurationSum()$ call for each $edge\_index$ of incoming edge
+	\item starts a cycle A for each $thread\_num$ from 0 to $thread\_count - 1$
+	\item initializes $chosen\_duration = 0$
+	\item initializes $chosen\_processors$ as an empty vector
+	\item initializes $passing\_durations$ is an empty hashmap
+	\item if maximum duration in $durations$ is more than $avg\_duration$, calls $ChoozeProcessor$ for corresponding pair in $durations$ set.
+	\item starts a while cycle B until $durations$ is not empty
+	\item by means of binary search finds in the set $durations$ an upper bound of durations, which can be added to $chosen\_duration$ so that sum is not more than $avg\_duration$. That is, we want to add message processors until sum of their execution durations does not exceed average wanted time.
+	\item if there are no such durations in $durations$ set, there is no message processor we can add to the current thread without exceeding average execution time. In this case, algorithm breaks cycle B.
+	\item In the other case, among all suitable message processors with duration less than found upper bound, chooses a $message\_processor$, which has the largest passing duration, which is detected by $passing\_durations$ hash map (absence of key in $passing\_durations$ map implies zero value here)
+	\item calls $ChoozeProcessor$
+	\item goes to the start of B cycle
+	\item if got here, algorithm has nothing more to add to the current thread
+	\item adds $chosen\_processors$ to vector of vector of shards we are going to return from this function
+	\item goes to the start of A cycle
+	\item calls $SetSenderCVs$ for just built vector of vector of shards
+	\item returns vector of vector of shards
+\end{itemize}
+
+Such algorithm helps to distribute computations evenly and also tries to combine message processors with high communication rate together, which helps to reduce cache ping-pong while accessing same message passing queue.
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
@@ -1116,6 +1247,7 @@ $MessageType$ is an arbitrary class, which stores the message itself.
 $Sender$ is a template parameter, which is needed for the reason that sender object is of an unspecified type.
 
 \subsection{Message passing tree}
+\label{subsec:message_passing_tree}
 
 $MessagePassingTree<Edge<MessageProcessor1, MessageProcessor2, MessageType1>, Edge<MessageProcessor3, MessageProcessor4, MessageType2>, ...>$ is a message-processor controller. It helps to register message passing communication edges and check are there unregistered send operations inside \hyperref[subsec:message_processor]{message processors} at a compile time. Additionally, it stores message passing queues, which help to send messages from one message processor to another.
 
@@ -1136,7 +1268,10 @@ protected:
 		EdgeProxy(GlobalPiper& piper) noexcept;
 		// Remembers piper reference
 
-		virtual void NotifyAboutMessage() const = 0;
+		virtual bool NotifyAboutMessage() const = 0;
+		virtual void SetConditionVariable(std::condition_variable_any *) const noexcept = 0;
+		virtual const int GetFromIndex() const noexcept = 0;
+		virtual const int GetToIndex() const noexcept = 0;
 
 		virtual ~EdgeProxy() noexcept {}
 	protected:
@@ -1183,7 +1318,7 @@ protected:
 	int max_message_processor_index;
 	int max_edge_index;
 	std::vector<std::vector<int>> dest_pipes;
-	std::vector<std::deque<std::unique_ptr<MessageBase>>> queues;
+	std::vector<LockFreeQueue<std::unique_ptr<MessageBase>>> queues;
 	std::vector<std::unique_ptr<MessageProcessorBase>> message_processors;
 };
 \end{lstlisting}
@@ -1203,6 +1338,7 @@ protected:
 
 		template <typename To2, typename Message2>
 		void Send(std::unique_ptr<Message2> message);
+		// notifies condition variable from notify_condition_variables vector
 		// May throw, strong exception safety
 	private:
 		GlobalPiper& piper;
@@ -1219,15 +1355,27 @@ protected:
 		// May throw, basic exception safety
 
 	};
+
 	template <typename GlobalPiper>
 	class EdgeProxy : public Piper<>::EdgeProxy<GlobalPiper> {
 	public:
 		using Piper<>::EdgeProxy<GlobalPiper>::EdgeProxy;
 		using Piper<>::EdgeProxy<GlobalPiper>::piper;
 
-		virtual void NotifyAboutMessage() const;
-		// Calls Receive method of MessageProcessor, passing as SenderProxy object
+		virtual bool NotifyAboutMessage() const;
+		// if queue is not empty, calls Receive method of MessageProcessor, passing as SenderProxy object
+		//	and returns true, returns false otherwise
 		// May throw, basic exception safety
+
+		virtual void SetConditionVariable(std::condition_variable_any*) const noexcept;
+		// sets corresponding condition variable in vector notify_condition_variables
+
+		virtual const int GetFromIndex() const noexcept;
+		// returns cur_to_index of current Piper layer
+
+		virtual const int GetToIndex() const noexcept;
+		// returns cur_from_index of current Piper layer
+
 	};
 public:
 	using Piper<Args...>::max_message_processor_index;
@@ -1271,7 +1419,12 @@ public:
 	//	Fills edge_handlers with EdgeProxy<GlobalPiper> instance
 	// May throw, basic exception safety
 
-	int GetMessageProcessorIndexImpl(const TypeSpecifier<From>&) noexcept;
+	void InitializeNotifyConditionVariables();
+	// Initializes notify_condition_variables with nullptrs
+	// May throw, basic exception safety
+
+
+	int GetMessageProciessorIndexImpl(const TypeSpecifier<From>&) noexcept;
 	// Specification which returns index of message processor 'From'
 
 	int GetMessageProcessorIndexImpl(const TypeSpecifier<To>&) noexcept;
@@ -1283,6 +1436,7 @@ private:
 	int cur_to_index;
 	int cur_from_index;
 	int cur_edge_index;
+	std::vector<std::condition_variable_any *> notify_condition_variables;
 };
 \end{lstlisting}
 
@@ -1298,6 +1452,7 @@ public:
 	MessagePassingTree();
 	// Calls AddMessageProcessorsImpl<GlobalPiper> to fill message_processor_handlers
 	//	calls FillEdgeProxysImpl<GlobalPiper> to fill edge_handlers
+	//	calls InitializeNotifyConditionVariables to fill condition variables
 	//
 	// May throw, basic exception safety
 
@@ -1307,6 +1462,19 @@ public:
 	const Piper<>::MessageProcessorProxy<GlobalPiper>* GetMessageProcessorProxy(const int index) noexcept;
 	// returns message processor handler from message_processor_handlers vector;
 
+	const size_t GetMessageProcessorsCount() noexcept;
+	// returns message_processor_handlers size
+
+	const size_t GetEdgesCount() noexcept;
+	// returns edge_handlers size
+
+	std::vector<int>& GetIncomingEdges(const int message_processor_index) noexcept;
+	// Gets all incoming edges
+
+	std::vector<int>& GetOutgoingEdges(const int message_processor_index) noexcept;
+	// Gets all outgoing edges
+
+	std::vector<int>& GetConnectingEdges(const int first_mp_index, const int second_mp_index) noexcept;
 private:
 	std::vector<std::unique_ptr<Piper<>::EdgeProxy<GlobalPiper>>> edge_handers;
 	std::vector<std::unique_ptr<Piper<>::MessageProcessorProxy<GlobalPiper>>> message_processor_handlers;
@@ -1344,7 +1512,7 @@ public:
 	void Finish() noexcept;
 	uint64_t GetCount() noexcept;
 	uint64_t GetDurationSum() noexcept;
-	void Reset();
+	void Reset() noexcept;
 private:
 	PeriodicTimer start_timer;
 	PeriodicTimer finish_timer;
@@ -1369,20 +1537,24 @@ Here is how helper class looks
 \begin{lstlisting}
 class Controller {
 public:
-	void ProcessShard(can_be_updated, shard_num);
+	void ProcessShard(const bool can_be_updated, const int shard_num);
 	// Exceptions: basic safety
 
-	void PreProcess(can_be_updated);
+	void PreProcess(const int thread_num, const bool can_be_updated);
 	// Exceptions: basic safety
 
-	void OnSwitch(const std::vector<int>& new_shards) noexcept;
+	void OnSwitch(const int thread_num, const std::vector<int>& new_shards) noexcept;
 
 	std::vector<std::vector<int>> GetInitialSharding(cont int thread_count);
 	// Exceptions: basic safety
 
 	std::vector<std::vector<int>> GetResharding(
 		const std::vector<std::vector<int>>& old_shard_configuration,
-		const int thread_count) noexcept;
+		const int thread_count);
+	// Exceptions: basic safety
+
+	const int GetMaxThreadCount();
+	// Exceptions: basic safety
 };
 \end{lstlisting}
 
