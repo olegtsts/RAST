@@ -1006,7 +1006,7 @@ It would store the following information:
 	\item $are\_queues\_empty$ (TLS) boolean variable which specifies whether incoming message queues have been empty on previous step
 	\item static constant $wait\_for\_messages\_time$ which specifies how much time a thread waits for message passing queues not to be empty in case all queues was empty at the previous step
 	\item vector $message\_processor\_timers$ of $StartFinishTimer$ instances for each message processor
-	\item vector $edges\_timers$ of $StartFinishTimer$ instances for each queue.
+	\item vector $edge\_timers$ of $StartFinishTimer$ instances for each queue.
 \end{itemize}
 
 Now let us turn to the implementation of $Controller$ required functions.
@@ -1033,9 +1033,9 @@ $ProcessShard(can\_be\_updated, shard\_num)$ does the following:
 	\item gets all incoming queues indices using \\
 		$message\_passing\_tree.GetIncomingEdges(shard\_num)$
 	\item if $can\_be\_updated$ is $true$ for each index $queue\_index$ calls \\
-		$edges\_timers[queue\_index].Start()$
+		$edge\_timers[queue\_index].Start()$
 	\item calls $message\_passing\_tree.GetEdgeProxy(queue\_index).NotifyAboutMessage()$
-	\item if $can\_be\_updated$ is $true$ calls $edges\_timers[queue\_index].Finish()$
+	\item if $can\_be\_updated$ is $true$ calls $edge\_timers[queue\_index].Finish()$
 	\item if any message passing queue was not empty, sets $are\_queues\_empty$ to $false$
 \end{itemize}
 
@@ -1060,7 +1060,10 @@ $OnSwitch(thread\_num, new\_shards)$ does the following:
 	\item for each $new\_shard$ in $new\_shards$ calls \\
 		$message\_passing\_tree.GetOutgoingEdges(new\_shard)$ to get outgoing queues indices
 	\item for all outgoing queues sets condition variable of queue (by calling $SetConditionVariable$ method) to $message\_send\_cvs[outgoing\_queue\_index]$. As far as no $ProcessShard$ on any current message processor is processing, we may safely update condition variables of outgoing queues facing no data races.
-	\item calls $Reset$ method for all timers in $message\_processor\_timers$ and $edge\_timers$
+	\item calls $message\_processor\_timers[new\_shard].Reset()$
+	\item gets all incoming edges indices by call to \\
+		$message\_passing\_tree.GetIncomingEdges(new\_shard)$
+	\item calls  $edge\_timers[incoming\_edge\_index].Reset()$
 \end{itemize}
 
 In order to define $GetResharding$ procedure, let us introduce several local variables it is going to use:
