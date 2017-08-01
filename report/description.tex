@@ -839,30 +839,29 @@ Now our method $CheckTime$ acts if it was planned. However, it bears a unique ca
 \subsection{Shadow-paging thread-wise sharder}
 \label{subsec:shadow_page_thread_wise_sharder}
 
-Sometimes it is needed to distribute some job between threads. Here we assume that we have a one big job, which can be represented as a composition of several small operations, which we will call ``shards''. Basically, shard is rather a dataset, which is associated with some actions. For instance, shard may be an index of a large vector, which we want to process in parallel.
+Sometimes it is needed to distribute some job between threads. Here we assume that we have a one big job, which can be represented as a composition of several small operations indexed by integer numbers, which we will call ``shards''. Here we are aiming to going further and to introduce resharding process, which helps to adjust to circumstances in runtime.
 
-In order to use $Sharder$, user would provide template parameters:
+A good idea would be to separate the logic part (which does job shards and knows how to reshard to make job faster) and the infrastructural part (which is about a thread-safe logic of how to organize resharding).
+
+The logic part is going to be processed by any user-provided class $Controller$, and an infrastructural part is going to be handled by $Sharder<Controller>$ class.
+
+$Controller$ class would have the following methods:
 \begin{itemize}
-	\item $ShardData$, which is a type of data stored in shard
-	\item $ShardGroupData$, which is a common data for a group of shards belonging to one thread
+	\item $ProcessShard(can\_be\_updated, shard\_num)$ which processes actions of shard $shard\_num$ ($can\_be\_updated$ specifies whether $Controller$ can update information of shard, which is used for resharding)
+	\item $PreProcesss(can\_be\_updated)$ which is called from $Sharder$ before processing shards
+	\item $OnSwitch(new\_shards)$ which is called by $Sharder$ when a thread started to work with new shards after resharding. A new shards vector is passed to it.
+	\item $GetInitialSharding(thread\_count)$, which returns vector of vector of numbers of shards
+	\item $GetResharding(old\_shard\_configuration, thread\_count)$, where $old\_shard\_configuration$ is a current vector of vector of shards, and the function should return new vector of vector of shards
 \end{itemize}
 
-Moreover, user would provide $Sharder$ with several lambda-functions:
-\begin{itemize}
-	\item $ProcessShard(can\_be\_updated, shard\_data, shard\_group\_data)$ which is called on shard processing
-	\item $ProcessShardGroup(can\_be\_updated, shard\_group\_data)$ which is called on shard group processing
-	\item $InitialShardCallback(target\_shard\_configuration, thread\_count)$ which is an implementation of an algorithm which constructs the initial sharding
-	\item $ReshardCallback(old\_shard\_configuration, new\_shard\_configuration, thread\_count)$, which is an implementation of an algorithm of how user wants to do resharding
-\end{itemize}
+Implementation of $Controller$ class is user-specific, since that we will not discuss any possible implementation of $Controller$ in this section.
 
-That is, a user tells $Sharder$ how to do resharding, while $Sharder$ provides a thread-safe infrastructure for this process.
-
-$Sharder$ has the following responsibilities:
+$Sharder<Controller>$ has the following responsibilities:
 \begin{itemize}
 	\item guaranteeing read-write lock on shards data. That is, if some shard data is being modified, nobody should read it at this point
 	\item assigning a group of shards to each thread
 	\item doing $Reshard$ process periodically by forming new configuration of sharding by means of shadow paging
-	\item call $ProcessShard$ and $ProcessShardGroup$ functions to process shards actions
+	\item call $ProcessShard$, $PreProcesss$ and $OnSwitch$ functions to process shards actions
 \end{itemize}
 
 To avoid several race condition problems, it would be much easier to allow $Reshard$ call only from main thread. Still there are some difficulties remained. We are going to do $Reshard$ by looking at current state of shards and deciding how to redistribute them. However, while $Reshard$ operation is reading shards info, it can be updated by any of the other threads. This poses a risk of data race condition. In order to avoid it, let us introduce $NoUpdatePromise$ method. Such a method would help to establish $Reshard$ basic requirement: resharding is possible if and only if all threads stopped to update shards data and called $NoUpdatePromise$. After that, we may safely read current shards data and decide how to reshard them. Afterwards, all threads should start to use new sharding configuration. And, if there would be a need in another resharding, all threads must again promise not to update current state of shards.
@@ -881,46 +880,29 @@ Mutexes associated with shards help us to solve data races different threads may
 
 After coping with algorithmic problems, let us turn to the implementation issues.
 
-Let us introduce $Shard$ class, which will contain the following variables:
+$Sharder<Controller>$ contains the following variables:
 \begin{itemize}
-	\item $data$ of type $ShardData$ (provided by user via template)
-	\item mutex
-\end{itemize}
-
-$Shard$ will have the following functions:
-\begin{itemize}
-	\item $Lock$ which locks the mutex of the shard
-	\item $Unlock$ which unlocks the mutex
-\end{itemize}
-
-Let us introduce a $ShardGroup$, which consist of the following:
-\begin{itemize}
-	\item $can\_be\_updated$ stores whether a thread had already made a promise not to update this shard group
-	\item $data$ stores a user-defined group data of type $ShardGroupData$
-	\item vector $shards$ of $Shard$ instances
-\end{itemize}
-
-$ShardingConfiguration$ would contain a $shard\_groups$ vector of $ShardGroup$ instances.
-
-$Sharder$ contains the following variables:
-\begin{itemize}
-	\item $first\_conf$ of type $ShardingConfiguration$
-	\item $second\_conf$ of type $ShardingConfiguration$
+	\item $controller$ of type $Controller$
+	\item $first\_conf$ is a vector of vector of shards
+	\item $second\_conf$ is a vector of vector of shards
+	\item $can\_be\_updated$ (TLS) boolean variable, which specifies if shard data can be modified by $controller$ object
 	\item $is\_first\_local$ (TLS) boolean variable, which indicates which configuration a thread is using: $first\_conf$ or $second\_conf$
 	\item $thread\_num$ (TLS), which is a current thread number
 	\item $reshard\_waiting\_timer$ (TLS) is a $WaitingTimer$ instance needed to measure when next resharding is required (see \fullref{subsec:low_overhead_waiting_timer})
 	\item $threads\_count$, which would be initialized on construction
 	\item atomic pair $(is\_first\_main, noupdate\_counter)$. $is\_first\_main$ indicates whether current active configuration is stored in $first\_conf$ or in $second\_conf$, while $noupdate\_counter$ shows how many threads promised not to update shards data.
 	\item $threads$ is a vector of threads
+	\item $shard\_locks$ is a vector of mutexes
 \end{itemize}
 
 Data of $Sharder$ is initialized the following way:
 \begin{itemize}
 	\item $threads\_count$ is initialized as maximum hardware concurrency
 	\item $(is\_first\_main, noupdate\_counter) = (true, 0)$
-	\item $first\_conf$ is initialized by call to $InitialShardCallback(first\_conf, thread\_count)$
+	\item $first\_conf$ is initialized by call to $controller.GetInitialSharding(thread\_count)$
 	\item $second\_conf$ is initialized by default
 	\item $threads$ is initialized as an empty vector
+	\item $shard\_locks$ is initialized as a vector of size being equal to shards count
 \end{itemize}
 
 $Sharder$ would have the following methods:
@@ -928,7 +910,7 @@ $Sharder$ would have the following methods:
 	\item $GetConf$ accepts boolean and returns $first\_conf$ if $true$ and $second\_conf$ otherwise
 	\item $Reshard$
 	\item $NoUpdatePromise$
-	\item $GetShardGroup$
+	\item $GetShards$
 	\item $SwitchConfiguration$
 	\item $ThreadAction$
 	\item $Run$
@@ -938,58 +920,67 @@ $Reshard$ method has the following algorithm:
 \begin{itemize}
 	\item if it is called not from main thread, do nothing
 	\item read $(is\_first\_main, noupdate\_counter)$ pair
-	\item if $noupdate\_counter$ is less than $threads\_count$, do nothing
-	\item call $ReshardCallback(GetConf(is\_first\_main), GetConf(!is\_first\_main), thread\_count)$, which fills shadow configuration $GetConf(!is\_first\_main)$ by some algorithm basing on the current configuration $GetConf(is\_first\_main)$
+	\item if $noupdate\_counter$ is less than $threads\_count$, do nothing. Otherwise, there is a need for resharding
+	\item call $controller.GetResharding(GetConf(is\_first\_main), thread\_count)$ and assign its result to $GetConf(!is\_first\_main)$
 	\item try CAS $(is\_first\_main, noupdate\_counter)$ ($(cur\_first\_main, threads\_count) \rightarrow (!cur\_first\_main, 0)$) and do nothing on CAS failure
 	\item call $reshard\_waiting\_timer.Reset()$ on CAS success
 \end{itemize}
 
 $NoUpdatePromise$ method
 \begin{itemize}
-	\item sets $GetConf(is\_first\_local).shard\_groups[thread\_num].can\_be\_updated$ to $false$.
+	\item sets $can\_be\_updated$ to $false$.
 	\item tries to increment $noupdate\_counter$ using CAS and re-reading pair $(is\_first\_main, noupdate\_counter)$ in the cycle until CAS succeeds or until after some of reads we find that $is\_first\_main$ is not the same as $is\_first\_local$.
 \end{itemize}
 
-$GetShardGroup$ would have the following logic:
+$GetShards$ would have the following logic:
 \begin{itemize}
 	\item check if $is\_first\_local$ is the same as $is\_first\_main$. If so, we do not need to switch to a new configuration. Otherwise, we need to call $SwitchConfiguration$ method
-	\item return $GetConf(is\_first\_local).shard\_groups[thread\_num]$
+	\item return $GetConf(is\_first\_local)[thread\_num]$
 \end{itemize}
 
 $SwitchConfiguration$ procedure does the following:
 \begin{itemize}
 	\item call $reshard\_waiting\_timer.Reset()$
-	\item for all shards in $GetConf(is\_first\_local).shard\_groups[thread\_num].shards$ call $Unlock$
-	\item for all shards in $GetConf(is\_first\_main).shard\_groups[thread\_num].shards$ call $Lock$
+	\item for all shards in $GetConf(is\_first\_local)[thread\_num]$ call $unlock$ for the corresponding mutex from $shard\_locks$ vector
+	\item for all shards in $GetConf(is\_first\_main)[thread\_num]$ call $lock$ for the corresponding mutex from $shard\_locks$ vector
 	\item update $is\_first\_local = is\_first\_main$
+	\item set $can\_be\_updated$ to $true$.
+	\item call $controller.OnSwitch(GetConf(ls\_first\_local)[thread\_num])$
 \end{itemize}
 
 $ThreadAction$ is a function which would be assigned to threads. It accepts $thread\_num$ and does the following:
 \begin{itemize}
 	\item set TLS variable $thread\_num$ to the value it accepted from caller
 	\item start an infinite cycle
-	\item call $GetShardGroup$ and store value to $group$ variable
-	\item call $ProcessShardGroup(group.can\_be\_updated, group.data)$, wrapping exceptions with retries
-	\item for each shard in group calls $ProcessShard(group.can\_be\_updated, shard.data, group.data)$, wrapping exceptions with retries
+	\item call $GetShards$ and store value to $shards$ variable
+	\item call $controller.PreProcesss(can\_be\_updated)$, wrapping exceptions with retries
+	\item for each shard in $shards$ call $controller.ProcessShard(can\_be\_updated, shard\_num)$, wrapping exceptions with retries
 	\item if $reshard\_waiting\_timer.CheckTime()$ returns $true$, time for resharding has come. We have to call $NoUpdatePromise$ and $Reshard$.
 \end{itemize}
 
 Finally, $Run$ method will initialize $threads$ vector with $thread\_count - 1$ threads associated with $ThreadAction$, afterwards calling $ThreadAction$ in main thread also.
 
-Let us also outline the requirements to $ShardData$ and $ShardGroupData$:
+Let us also outline the algorithmic and exception requirements to $controller$.
+
+First of all, the algorithmic requirements:
 \begin{itemize}
-	\item $ShardData$ of different shards cannot manipulate the same external not-thread-safe data, otherwise a data race would occur
-	\item however, for the reason that shards are protected with mutex, $ShardData$ of each single shard may contain external links and operate with external not-thread-safe data
-	\item $ShardGroupData$ cannot manipulate with references to external not-thread-safe data at all, because it is not protected with mutexes.
-	\item $ShardData$ and $ShardGroupData$ may store any inner not-thread-safe data with no negative effect, because new shards and new shard groups are constructed over shadow page of sharding configuration
-	\item since we are retrying $ProcessShardGroup$ and $ProcessShard$ functions, they must provide at least basic exception safety
+	\item $ProcessShard(can\_be\_updated, shard\_num)$ should manipulate with external not-thread-safe data only if a data is uniquely specified by $shard\_num$ and there is no intersection between different $shard\_num$'s data. Function cannot update such data in case if $can\_be\_updated$ is $false$.
+	\item $PreProcesss$ cannot manipulate with external not-thread-safe data at all, because it is not protected with mutexes.
+	\item $GetResharding$ can safely read all data associated with shards, which was updated during $ProcessShard$ calls. It is also safe to assume, that no other thread calls $OnSwitch$ until $GetResharding$ finishes. That is because before $GetResharding$ call all threads promised not to update current shards info, which means that they are already using current shard configuration and not going to switch until CAS, which goes after $GetResharding$.
+	\item while implementing $OnSwitch(new\_shards)$ it is safe to assume, that each shard of $new\_shards$ is not processed by any thread until $OnSwitch$ completion. That is because before calling $OnSwitch$, we locked the shards in the current thread, but have not started to process them yet. It is also safe to assume, that main thread is not processing function $GetResharding$ until $OnSwitch$ completion, for the reason that otherwise $OnSwitch$ is processed at the same time as $GetResharding$ is processing, which is impossible as it has been stated above.
 \end{itemize}
 
-Exception requirements:
+The exception requirements:
 \begin{itemize}
-	\item $InitialShardCallback$ may throw, should provide basic exception safety
-	\item $ReshardCallback$ should not throw
+	\item $ProcessShard$ may throw, should provide at least basic exception safety
+	\item $PreProcesss$ may throw, should provide at least basic exception safety
+	\item $OnSwitch$ should not throw
+	\item $GetInitialSharding$ may throw, should provide basic exception safety (however, any reasonable implementation would not throw anyway)
+	\item $GetResharding$ should not throw
 \end{itemize}
+
+\subsection{}
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
@@ -1374,36 +1365,24 @@ private:
 \subsection{Shadow-paging thread-wise sharder interface}
 Here we are to outline classes and methods required for $Sharder$, which is described in the section \fullref{subsec:shadow_page_thread_wise_sharder}
 
-Here are how helper classes look:
+Here is how helper class looks
 \begin{lstlisting}
-template <typename ShardData>
-class Shard {
-	void Lock() noexcept;
-	// Although lock of the mutex can throw,
-	// it does throw in cases if our thread has
-	// no permissions to lock mutex, or if
-	// a deadlock is detected.
-	// We treat both cases as being impossible
-
-	void Unlock() noexcept;
+class Controller {
 public:
-	ShardData data;
-private:
-	mutable std::mutex mu;
-};
+	void ProcessShard(can_be_updated, shard_num);
+	// Exceptions: basic safety
 
-template <typename ShardData, typename ShardGroupData>
-class ShardGroup {
-public::
-	bool can_be_updated;
-	ShardGroupData data;
-	std::vector<Shard<ShardData>> shards;
-};
+	void PreProcess(can_be_updated);
+	// Exceptions: basic safety
 
-template <typename ShardData, typename ShardGroupData>
-class ShardingConfiguration {
-public:
-	std::vector<ShardGroup<ShardData, ShardGroupData> shard_groups;
+	void OnSwitch(const std::vector<int>& new_shards) noexcept;
+
+	std::vector<std::vector<int>> GetInitialSharding(cont int thread_count);
+	// Exceptions: basic safety
+
+	std::vector<std::vector<int>> GetResharding(
+		const std::vector<std::vector<int>>& old_shard_configuration,
+		const int thread_count) noexcept;
 };
 \end{lstlisting}
 
@@ -1414,44 +1393,37 @@ struct ShadowCounter {
 	unsigned noupdate_counter:7;
 };
 
-template <typename ShardData, typename ShardGroupData>
+template <typename Controller>
 class Sharder {
 public:
-	using Conf = ShardingConfiguration<ShardData, ShardGroupData>;
-
-	template <typename TInitializeFunc>
-	Sharder(TInitializeFunc initial_shard_callback);
+	Sharder(Controller& controller);
 	// Constructor may throw, basic exception safety
 
-	Conf& GetConf(bool is_first) noexcept;
+	std::vector<std::vector<int>>& GetConf(bool is_first) noexcept;
 
-	template <typename TReshardFunc>
-	void Reshard(TReshardFunc reshard_callback) noexcept;
-	// Required reshard_callback to not throw
+	void Reshard() noexcept;
 
 	void NoUpdatePromise() noexcept;
 
-	ShardGroup& GetShardGroup() noexcept;
+	std::vector<int>& GetShards() noexcept;
 
 	void SwitchConfiguration() noexcept;
 
-	template <typename TProcessShardFunc, typename TProcessShardGroupFunc, typename TReshardFunc>
-	void ThreadAction(const int thread_num, TProcessShardFunc process_shard,
-		TProcessShardGroupFunc process_shard_group, TReshardFunc reshard) noexcept;
+	void ThreadAction(const int thread\_num) noexcept;
 	// Inside we have to catch exceptions, though
 
-	template <typename TProcessShardFunc, typename TProcessShardGroupFunc, typename TReshardFunc>
-	void Run(TProcessShardFunc process_shard, TProcessShardGroupFunc process_shard_group,
-		TReshardFunc reshard) noexcept;
+	void Run() noexcept;
 	// Thread launching may throw, but if it does, we cannot do anything better than to terminate
 	// That is why we mark function as noexcept
 private:
-	Conf first_conf;
-	Conf second_conf;
+	std::vector<std::vector<int>> first_conf;
+	std::vector<std::vector<int>> second_conf;
 	int threads_count;
 	ShadowCounter shadow_counter;
 	std::vector<std::thread> threads;
+	std::vector<std::mutex> shard_locks;
 
+	static thread_local bool can_be_updated;
 	static thread_local bool is_first_local;
 	static thread_local int thread_num;
 	static thread_local WaitingTimer reshard_waiting_timer;
