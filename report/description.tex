@@ -695,7 +695,7 @@ On the account of these simple measurements, we decided that it is better to use
 
 In order to make the system more efficient, sometimes it is required to measure operations in order to distribute them ideally between different threads. However, a lot of calls to system timer would result in slower performance.
 
-The purpose of the current section is to establish easy-to-use time measuring algorithm, which will somehow not slow down the performance being called a lot of times in a short period of time. To simplify matters, let us construct a timer, which has $GetPassedTime$ function, which being called the first time, would return unix timestamp (time since year 1970), and being called further would return the time passed since its last call. This timer will not be thread-safe, it will be designed to be used in one thread only.
+The purpose of the current section is to establish easy-to-use time measuring algorithm, which will somehow not slow down the performance being called a lot of times in a short period of time. To simplify matters, let us construct a timer, which has $GetPassedTime$ function, which being called the first time, would return unix timestamp (time since year 1970), and being called further would return the time passed since its last call. Let us also have a $Reset$ method, which resets timer settings to default ones. This timer will not be thread-safe, it will be designed to be used in one thread only.
 
 Basically, the idea is simple: if we cannot access system clock on each call, be should access them more rarely, thus sometimes we will provide approximate results on $GetPassedTime$ call. On the contrary, sometimes on $GetPassedTime$ call we will call system clock and catch up or slow down depending on our previous not exact responses. That is, our not-so-exact timer needs to be winded up when we do access system clock.
 
@@ -719,6 +719,8 @@ The initial values of parameters would be the following:
 	\item $last\_system\_time = 0$
 	\item $approx\_time\_step$ will be initialized on first $GetPassedTime$ call, as it will be seen further
 \end{itemize}
+
+The $Reset$ procedure would reset parameters to their initial values.
 
 The $WindUp$ procedure would do the following:
 \begin{itemize}
@@ -801,7 +803,7 @@ $GetCount$ method returns  $measurements\_counter$
 
 $GetDurationSum$ method returns $max(PerioicTimer::min\_measured\_time, duration\_sum)$.
 
-$Reset$ method reinitializes all parameters $start\_timer$, $finish\_timer$, $measurements\_counter$ and $duration\_sum$.
+$Reset$ method reinitializes all parameters $measurements\_counter$ and $duration\_sum$ and calls $Reset$ method of timers $start\_timer$ and $finish\_timer$.
 
 The implementation here is very simple due to the fact that we have already passed through all the difficulties while building \fullref{subsec:low_overhead_periodic_timer} algorithm.
 
@@ -1113,7 +1115,32 @@ $GetResharding(shard\_configuration, thread\_count)$ does the following:
 	\item returns vector of vector of shards
 \end{itemize}
 
-Such algorithm helps to distribute computations evenly and also tries to combine message processors with high communication rate together, which helps to reduce cache ping-pong while accessing same message passing queue.
+Such algorithm helps to distribute computations evenly and also tries to combine message processors with high communication rate together, which helps to reduce cache ping-pong while two message processors are accessing the same message passing queue.
+
+Let us check that we work with data correctly, without any races. In order to do that, we have to consider every variable we store:
+\begin{itemize}
+	\item $message\_passing\_tree$ is a proxy object made to access queues and message processors, it is not modified itself
+	\item $message\_wait\_cvs$ is not modified after initialization
+	\item $message\_send\_cvs$ is accessed in several functions: $SetSenderCVs$ which is called inside resharding, also it is accessed in $OnSwitch$. Sharder guarantees $OnSwitch$ never intersects with resharding in execution timeline.
+	\item $are\_queues\_empty$ is in TLS, thus no races are possible
+	\item $wait\_for\_messages\_time$ is constant
+	\item $message\_processor\_timers$ is accessed in several functions: $ProcessShard$ updates $shard\_num$ index, $OnSwitch$ updates indices of switching shards, $GetResharding$ reads the whole vector. In order to sort it out, let us consider all pairs of functions. First of all, sharder guarantees that shards passed to $OnSwitch$ are not processed by $ProcessShard$ at the moment of $OnSwitch$ execution, which implies, that there is no race between $OnSwitch$ and $ProcessShard$. Secondly, $ProcessShard$ does not update information read by $GetResharding$ because of $NoUpdatePromise$ requirement. Finally, $OnSwitch$ and $GetResharding$ have not intersecting execution timelines, that is why they do not conflict either.
+	\item $edge\_timers$ is accessed in several functions: $ProcessShard$ updates indices, which are incoming queue indices for message processor $shard\_num$, $OnSwitch$ also accesses only indices of incoming queues of its shards, $GetResharding$ accesses the whole vector. The same discourse as above would show that there are no data races.
+\end{itemize}
+
+As it can easily be concluded, we do not have data races in $MessagePassingController$.
+
+\begin{samepage}
+	The only question remained is whether in satisfies $Sharder$ requirements on $Controller$ class:
+	\begin{itemize}
+		\item $ProcessShard$ manipulates with message processor indexed by $shard\_num$ and its incoming queues. It is obvious that these objects sets do not intersect for different shard numbers.
+		\item $PreProcess$ manipulates with thread-safe condition variable and TLS variable\\
+			$are\_queues\_empty$, which is ok
+		\item $OnSwitch$ does not throw, it calls only noexcept functions
+		\item the rest functions have basic exception safety
+	\end{itemize}
+\end{samepage}
+All the requirements of sharder are satisfied.
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
@@ -1499,6 +1526,7 @@ private:
 	void WindUp() noexcept;
 public:
 	int64_t GetPassedTime() noexcept;
+	void Reset() noexcept;
 private:
 	static const int64_t min_system_click_call_period;
 	static const int64_t max_wind_up_steps;
