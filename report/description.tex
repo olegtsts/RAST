@@ -1632,5 +1632,62 @@ private:
 	static thread_local WaitingTimer reshard_waiting_timer;
 };
 \end{lstlisting}
+
+\subsection{Dynamically-sharded message passing interface}
+Controller object have the following interface:
+\begin{lstlisting}
+template <typename ... Args>
+class MessagePassingController {
+public:
+	MessagePassingController();
+	// Exceptions: basic safety
+
+	void ProcessShard(const bool can_be_updated, const int shard_num);
+	// Exceptions: basic safety
+
+	void PreProcess(const int thread_num, const bool can_be_updated);
+	// Exceptions: basic safety
+
+	void OnSwitch(const int thread_num, const std::vector<int>& new_shards) noexcept;
+
+	std::vector<std::vector<int>> GetInitialSharding(cont int thread_count);
+	// Exceptions: basic safety
+
+	std::vector<std::vector<int>> GetResharding(
+		const std::vector<std::vector<int>>& old_shard_configuration,
+		const int thread_count);
+	// Exceptions: basic safety
+
+	const int GetMaxThreadCount();
+	// Exceptions: basic safety
+private:
+	MessagePassingTree<Args...> message_passing_tree;
+	std::vector<std::condition_variable_any> message_wait_cvs;
+	std::vector<std::condition_variable_any *> message_send_cvs;
+	static thread_local bool are_queues_empty;
+	static const uint64_t wait_for_messages_time;
+	std::vector<StartFinishTimer> message_processor_timers;
+	std::vector<StartFinishTimer> edge_timers;
+};
+\end{lstlisting}
+
+Let us also introduce easy-to-use completion wrapper:
+\begin{lstlisting}
+\template <typename ... Args>
+class DynamicallyShardedMessagePassing {
+public:
+	DynamicallyShardedMessagePassing()
+	// creates controller by default constructor,
+	// 	creates sharder passing controller reference
+	// Exceptions: basic safety
+
+	void Run() noexcept;
+	// Proxies sharder.Run() call
+
+private:
+	MessagePassingController<Args...> controller;
+	Sharder<MessagePassingController<Args...>> sharder;
+};
+\end{lstlisting}
 \end{document}
 
