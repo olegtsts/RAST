@@ -986,7 +986,7 @@ The exception requirements:
 	\item $GetMaxThreadCount$ may throw, should provide at least basic exception safety
 \end{itemize}
 
-\subsection{Dynamically-sharded message passing}
+\subsection{Dynamically-sharded message passing pool}
 
 In the section \fullref{subsec:shadow_page_thread_wise_sharder} we have discussed how to shard a job. However, what remained uncovered is how to separate some job into shards and how to do resharding process. In case of a uniform job, for example, calling function $Func$ for each element of some vector, the question of how to shard a job is rather simple. When a job is complicated, it can usually be represented as several distinct logic blocks, some of which use results of some other logical blocks and together they form a full algorithm. That is called a ``message passing''. We would have several distinct message processors, which can accept messages, process them, and send messages to another message processors.
 
@@ -1633,7 +1633,7 @@ private:
 };
 \end{lstlisting}
 
-\subsection{Dynamically-sharded message passing interface}
+\subsection{Dynamically-sharded message passing pool interface}
 Controller object have the following interface:
 \begin{lstlisting}
 template <typename ... Args>
@@ -1673,8 +1673,8 @@ private:
 
 Let us also introduce easy-to-use completion wrapper:
 \begin{lstlisting}
-\template <typename ... Args>
-class DynamicallyShardedMessagePassing {
+template <typename ... Args>
+class DSMPPool {
 public:
 	DynamicallyShardedMessagePassing()
 	// creates controller by default constructor,
