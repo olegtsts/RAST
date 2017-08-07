@@ -1168,14 +1168,18 @@ It would have the following methods:
 
 $Dump$ has the following algorithm:
 \begin{itemize}
+	\item if $dump\_timer.CheckTime()$ returns $false$, do nothing
+	\item start try block
 	\item convert pairs from set $frequency\_exception$ to proto class
 	\item dump proto to a separate file
 	\item move separate file to $path$
+	\item call $dump\_timer.Reset()$
+	\item if any exception caught, ignore them
 \end{itemize}
 
 Replacing file by another moved file is safe even when some other process or thread is reading it.
 
-As far as $Dump$ makes system calls and calls constructors, it can throw. There is a strong exception safety though for the reason that not a single field is being modified.
+$Dump$ method absorbs its own exceptions and thus does not throw.
 
 $Restore$ has the following algorithm:
 \begin{itemize}
@@ -1212,8 +1216,6 @@ $AddException(exception)$ has the following algorithm:
 	\item if an exception is caught in try block A, delete  $(prev\_count + 1, exception)$ pair from $frequency\_exceptions$ and return from function doing nothing
 	\item if $prev\_count$ is move than zero, remove pair $(prev\_count, exception)$ from $frequency\_exception$ set
 	\item call $Trim$
-	\item if $dump\_timer.CheckTime()$ returns $true$, call $Dump$ function. If $Dump$ did throw any exception, ignore it.
-	\item if $Dump$ succeeded without any exceptions, call $dump\_timer.Reset()$
 \end{itemize}
 
 $AddException$ cannot throw, it absorbs all its own exceptions and in case if any exception handled, $AddException$ may have no effect. Still, that is not a problem for the reason that the functionality of $AddException$ is not so important, thus we do not need to provide strict guarantees. Even if we wanted to provide some guarantees, we would fail for the reason that the function is forced to be noexcept, because it is called on handling some already happened exception stored in the $exception$ variable. Therefore, if other exception arises, we could have gone into infinite recursion handling it the same way.
@@ -1775,9 +1777,8 @@ We would use $ExceptionWithBacktrace$ class of exception defined further in the 
 \begin{lstlisting}
 class ExceptionTopKeeper {
 public:
-	void Dump() const;
+	void Dump() const noexcept;
 	// Dumps exception top to file in path
-	// May throw, strong exception safety
 
 	void Restore();
 	// Restores previous exception top from file
