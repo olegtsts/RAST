@@ -1142,6 +1142,82 @@ As it can easily be concluded, we do not have data races in $MessagePassingContr
 \end{samepage}
 All the requirements of sharder are satisfied.
 
+\subsection{Exception top proto storage}
+\label{subsec:exception_top_proto_storage}
+In order to make it simple for users to administrate the system, let us somehow notify users about exception thrown. There is also a problem if some exception is thrown a lot of times, it becomes hard to distinguish it from other exceptions. Hence, it is better to store the same exception once with its appearance count. To avoid a lot of memory spent on storing exceptions, let us store only limited top of ones, since it is highly unlikely that any user would ever need to examine over thousand distinct exceptions without fixing the most frequent ones at first.
+
+Let us introduce class $ExeptionTopKeeper$, which would help to update top of exceptions with their frequencies, save it on disk and restore it from disk. Our $ExeptionTopKeeper$ would not be thread-safe and has to be instantiated inside TLS. That is, each thread would have its own exceptions top and a specific place to store it.
+
+$ExeptionTopKeeper$ contains the following data:
+\begin{itemize}
+	\item variable $path$, which is a path of a file where exceptions are stored
+	\item hashmap $exception\_frequency$ with key being an exception of type $ExceptionWithBacktrace$ (which is described in the section  \fullref{subsec:exception_with_backtrace}) and value being equal exception frequency
+	\item set $frequency\_exception$ of pairs $(frequency, exception)$ needed in order to maintain sorted order of exceptions by their frequencies
+	\item $dump\_timer$ of type $WaitingTimer$ (for details see \fullref{subsec:low_overhead_waiting_timer}), which is a timer telling when to $Dump$ exceptions on disk
+	\item static constant $top\_size$, which is a maximal amount of exceptions with counters stored
+\end{itemize}
+
+It would have the following methods:
+\begin{itemize}
+	\item $Dump$ method, which dumps exception data to file
+	\item $Restore$ method, which restores exception data from file
+	\item $Trim$ deletes exceptions stored if amount of different exceptions is more than $top\_size$
+	\item $SetPath(new\_path)$ which changes $path$ value to the one user wants
+	\item $AddException(exception)$, which adds the exception
+\end{itemize}
+
+$Dump$ has the following algorithm:
+\begin{itemize}
+	\item convert pairs from set $frequency\_exception$ to proto class
+	\item dump proto to a separate file
+	\item move separate file to $path$
+\end{itemize}
+
+Replacing file by another moved file is safe even when some other process or thread is reading it.
+
+As far as $Dump$ makes system calls and calls constructors, it can throw. There is a strong exception safety though for the reason that not a single field is being modified.
+
+$Restore$ has the following algorithm:
+\begin{itemize}
+	\item read proto from $path$ file
+	\item fill inner variables $exception\_frequency$ and $frequency\_exception$
+\end{itemize}
+
+$Restore$ may throw, no guarantees provided, caller should terminate in case of $Restore$ failure.
+
+$Trim$ has the following algorithm:
+\begin{itemize}
+	\item while size of $frequency\_exception$ set is larger than $top\_size$, delete the least pair
+\end{itemize}
+
+$Trim$ does not throw as far as it calls only erase operations.
+
+$SetPath$ has the following algorithm:
+\begin{itemize}
+	\item set $path$ to its new value
+	\item create a file, which has path $path$
+	\item call $Restore$ method
+\end{itemize}
+
+$SetPath$ would be marked as noexcept and terminate on creating file failure or $Restore$ failure.
+
+$AddException(exception)$ has the following algorithm:
+\begin{itemize}
+	\item assert $path$ is not empty string (that is, $SetPath$ has been called before)
+	\item initialize $prev\_count$ with zero
+	\item if $exception$ is found inside $exception\_frequency$ hashmap, assign $prev\_count$ to its frequency
+	\item start try block A
+	\item add pair $(prev\_count + 1, exception)$ to $frequency\_exceptions$.
+	\item replace value of $exception\_frequency[exception]$ with $prev\_count + 1$
+	\item if an exception is caught in try block A, delete  $(prev\_count + 1, exception)$ pair from $frequency\_exceptions$ and return from function doing nothing
+	\item if $prev\_count$ is move than zero, remove pair $(prev\_count, exception)$ from $frequency\_exception$ set
+	\item call $Trim$
+	\item if $dump\_timer.CheckTime()$ returns $true$, call $Dump$ function. If $Dump$ did throw any exception, ignore it.
+	\item if $Dump$ succeeded without any exceptions, call $dump\_timer.Reset()$
+\end{itemize}
+
+$AddException$ cannot throw, it absorbs all its own exceptions and in case if any exception handled, $AddException$ may have no effect. Still, that is not a problem for the reason that the functionality of $AddException$ is not so important, thus we do not need to provide strict guarantees. Even if we wanted to provide some guarantees, we would fail for the reason that the function is forced to be noexcept, because it is called on handling some already happened exception stored in the $exception$ variable. Therefore, if other exception arises, we could have gone into infinite recursion handling it the same way.
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
@@ -1687,6 +1763,91 @@ public:
 private:
 	MessagePassingController<Args...> controller;
 	Sharder<MessagePassingController<Args...>> sharder;
+};
+\end{lstlisting}
+
+\subsection{Exception top proto storage interface}
+
+Here we are to outline classes and methods of $ExceptionTopKeeper$, which is defined in the section \fullref{subsec:exception_top_proto_storage}.
+
+We would use $ExceptionWithBacktrace$ class of exception defined further in the section \fullref{subsec:exception_with_backtrace}. This exception class accesses global $ExceptionTopKeeper$ instance in its constructor in order to register itself via $AddException$ method.
+
+\begin{lstlisting}
+class ExceptionTopKeeper {
+public:
+	void Dump() const;
+	// Dumps exception top to file in path
+	// May throw, strong exception safety
+
+	void Restore();
+	// Restores previous exception top from file
+
+	void SetPath(const std::string& new_path) noexcept;
+	// Sets path to new_path
+
+	void AddException(const ExceptionWithBacktrace& exception) noexcept;
+	// Adds exception to form top
+private:
+	std::string path;
+	std::unordered_map<ExceptionWithBacktrace, uint64_t, ExceptionWithBacktraceHasher> exception_frequency;
+	std::set<std::pair<uint64_t, ExceptionWithBacktrace>> frequency_exception;
+	WaitingTimer dump_timer;
+	static const size_t top_size;
+}
+\end{lstlisting}
+
+Let us also declare a global thread\_local instance of the class above
+
+\begin{lstlisting}
+thread_local ExceptionTopKeeper exception_top_keeper;
+\end{lstlisting}
+
+\subsection{Exception with backtrace}
+\label{subsec:exception_with_backtrace}
+
+For various reasons, while handling exception, one may want to get access to stacktrace. For instance, having stacktrace makes it possible to pass it to the user, without aborting the program.
+
+Let us introduce a class $ExceptionWithBacktrace$ which on construction will accept exception reason as string and will remember current stacktrace from place in the code it was constructed. Moreover, it would register itself in global $exception\_top\_keeper$ instance.
+
+Let the $ExceptionWithBacktrace$ class be the following:
+\begin{lstlisting}
+class ExceptionWithBacktrace : public std::exception {
+public:
+	ExceptionWithBacktrace(const std::string& reason) noexcept
+	// stores reason and current backtrace, and their
+	//	human-readable concatenation in reason_with_backtrace,
+	//	catches inner exceptions and if caught, may leave
+	//	some of inner string fields empty
+	//	calls exception_top_keeper.AddException(*this) to
+	//	register current exception in the exception top structure
+
+	const std::string& GetStackStrace() const noexcept;
+	// returns backtrace;
+
+	const char* what() const noexcept;
+	// return reason_with_backtrace.c_str()
+
+	bool operator==(const ExceptionWithBacktrace& other) const noexcept;
+	// compares reason_with_backtrace fields
+
+	bool operator<(const ExceptionWithBacktrace& other) const noexcept;
+	// compares reason_with_backtrace fields
+
+	const std::string& GetReasonWithBacktrace() const noexcept;
+	// returns reason_with_backtrace
+private:
+	std::string reason;
+	std::string backtrace;
+	std::string reason_with_backtrace;
+};
+\end{lstlisting}
+
+To be able to pass $ExceptionWithBacktrace$ as a hash key we need to build up $ExceptionWithBacktraceHasher$ class, which is the following:
+\begin{lstlisting}
+struct ExceptionWithBacktraceHasher {
+	std::size_t operator()(const ExceptionWithBacktrace& exception) const noexcept {
+		return std::hash<std::string>()(exception.GetReasonWithBacktrace());
+	}
 };
 \end{lstlisting}
 \end{document}
