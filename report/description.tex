@@ -801,7 +801,7 @@ Algorithm for $Finish$ method
 
 $GetCount$ method returns  $measurements\_counter$
 
-$GetDurationSum$ method returns $max(PerioicTimer::min\_measured\_time, duration\_sum)$.
+$GetDurationSum$ method returns $max(PeriodicTimer::min\_measured\_time, duration\_sum)$.
 
 $Reset$ method reinitializes all parameters $measurements\_counter$ and $duration\_sum$ and calls $Reset$ method of timers $start\_timer$ and $finish\_timer$.
 
@@ -837,6 +837,25 @@ Function $CheckTime$ would have the following logic:
 \end{itemize}
 
 Now our method $CheckTime$ acts if it was planned. However, it bears a unique caller requirement as far as \fullref{subsec:low_overhead_periodic_timer} does.
+
+\subsection{Low-overhead periodic clock}
+\label{subsec:low_overhead_periodic_clock}
+
+$PeriodicClock$ would be a class, which is called from one specific location in the code and helps to get approximate current time without doing system call each time.
+
+It is based on \fullref{subsec:low_overhead_periodic_timer}
+
+It would contain the following data:
+\begin{itemize}
+	\item $current\_time$
+	\item $periodic\_timer$ of class $PeriodicTimer$
+\end{itemize}
+
+It would have the only method $GetTime$, which does the following:
+\begin{itemize}
+	\item increments $current\_time$ by value of $periodic\_timer.GetPassedTime()$
+	\item returns $current\_time$
+\end{itemize}
 
 \subsection{Shadow-paging thread-wise sharder}
 \label{subsec:shadow_page_thread_wise_sharder}
@@ -1144,17 +1163,22 @@ All the requirements of sharder are satisfied.
 
 \subsection{Exception top proto storage}
 \label{subsec:exception_top_proto_storage}
-In order to make it simple for users to administrate the system, let us somehow notify users about exception thrown. There is also a problem if some exception is thrown a lot of times, it becomes hard to distinguish it from other exceptions. Hence, it is better to store the same exception once with its appearance count. To avoid a lot of memory spent on storing exceptions, let us store only limited top of ones, since it is highly unlikely that any user would ever need to examine over thousand distinct exceptions without fixing the most frequent ones at first.
+In order to make it simple for users to administrate the system, let us somehow notify users about exception thrown. Here we face a problem if some exception is thrown a lot of times, it becomes hard to distinguish it from other exceptions. Hence, it is better to store the same exception once with its appearance count. To avoid a lot of memory spent on storing exceptions, let us store only limited top of ones, since it is highly unlikely that any user would ever need to examine over thousand distinct exceptions without fixing the most frequent ones at first.
 
-Let us introduce class $ExeptionTopKeeper$, which would help to update top of exceptions with their frequencies, save it on disk and restore it from disk. Our $ExeptionTopKeeper$ would not be thread-safe and has to be instantiated inside TLS. That is, each thread would have its own exceptions top and a specific place to store it.
+Let us introduce class $ExceptionTopKeeper$, which would help to update top of exceptions with their frequencies, save it on disk and restore it from disk. Our $ExceptionTopKeeper$ would not be thread-safe and has to be instantiated inside TLS. That is, each thread would have its own exceptions top and a specific place to store it.
 
-$ExeptionTopKeeper$ contains the following data:
+$ExceptionTopKeeper$ contains the following data:
 \begin{itemize}
 	\item variable $path$, which is a path of a file where exceptions are stored
-	\item hashmap $exception\_frequency$ with key being an exception of type $ExceptionWithBacktrace$ (which is described in the section  \fullref{subsec:exception_with_backtrace}) and value being equal exception frequency
+	\item hashmap $exception\_frequency$ with key being a string of exception and value being equal exception frequency
+	\item hashmap $exception\_last\_time$ with exception as key and its last appearance time as a value
 	\item set $frequency\_exception$ of pairs $(frequency, exception)$ needed in order to maintain sorted order of exceptions by their frequencies
+	\item set $last\_time\_exception$ of pairs $(last\_time, exception)$ needed to maintain sorted order of exceptions by their last appearance time
 	\item $dump\_timer$ of type $WaitingTimer$ (for details see \fullref{subsec:low_overhead_waiting_timer}), which is a timer telling when to $Dump$ exceptions on disk
+	\item $store\_clock$ of a class $PeriodicClock$ (for details see \fullref{subsec:low_overhead_periodic_clock}), which helps to get time of storing exception
 	\item static constant $top\_size$, which is a maximal amount of exceptions with counters stored
+	\item static constant $keep\_time$, which stores a period of time, after which exception disappears
+	\item static boolean constant $debug\_mode$, which being $true$ implies we call terminate on any exception thrown, and being $false$ implies we do not terminate, but rather store exception reason
 \end{itemize}
 
 It would have the following methods:
@@ -1162,15 +1186,16 @@ It would have the following methods:
 	\item $Dump$ method, which dumps exception data to file
 	\item $Restore$ method, which restores exception data from file
 	\item $Trim$ deletes exceptions stored if amount of different exceptions is more than $top\_size$
+	\item $RemoveOld(current\_time)$ deletes exceptions older than $current\_time - keep\_time$
 	\item $SetPath(new\_path)$ which changes $path$ value to the one user wants
-	\item $AddException(exception)$, which adds the exception
+	\item $WithCatchingException(callback)$, which calls $callback$ either with or without catching exceptions, which is defined by $debug\_mode$. In case if exception is caught, it is stored in the exception top
 \end{itemize}
 
 $Dump$ has the following algorithm:
 \begin{itemize}
 	\item if $dump\_timer.CheckTime()$ returns $false$, do nothing
 	\item start try block
-	\item convert pairs from set $frequency\_exception$ to proto class
+	\item convert data of variables $exception\_frequency$, $exception\_last\_time$, $last\_time\_exception$ and $frequency\_exception$ to proto class
 	\item dump proto to a separate file
 	\item move separate file to $path$
 	\item call $dump\_timer.Reset()$
@@ -1184,7 +1209,7 @@ $Dump$ method absorbs its own exceptions and thus does not throw.
 $Restore$ has the following algorithm:
 \begin{itemize}
 	\item read proto from $path$ file
-	\item fill inner variables $exception\_frequency$ and $frequency\_exception$
+	\item fill inner variables $exception\_frequency$, $exception\_last\_time$, $last\_time\_exception$ and $frequency\_exception$
 \end{itemize}
 
 $Restore$ may throw, no guarantees provided, caller should terminate in case of $Restore$ failure.
@@ -1192,9 +1217,22 @@ $Restore$ may throw, no guarantees provided, caller should terminate in case of 
 $Trim$ has the following algorithm:
 \begin{itemize}
 	\item while size of $frequency\_exception$ set is larger than $top\_size$, delete the least pair
+	\item also delete it from $exception\_frequency$ and $exception\_last\_time$, $last\_time\_exception$
 \end{itemize}
 
 $Trim$ does not throw as far as it calls only erase operations.
+
+$RemoveOld(current\_time)$ has the following also:
+\begin{itemize}
+	\item if $last\_time\_exception$ is empty, do nothing
+	\item start an infinite cycle A
+	\item take first element $(last\_time, exception)$ of $last\_time\_exception$
+	\item if $last\_time$ is more than $current\_time - keep\_time$, return from function
+	\item remove $exception$ from all containers $exception\_frequency$, \\
+		$frequency\_exception$, $exception\_last\_time$ and $last\_time\_exception$
+\end{itemize}
+
+$RemoveOld$ does not throw, because it calls only erasing functions from set and map.
 
 $SetPath$ has the following algorithm:
 \begin{itemize}
@@ -1205,20 +1243,33 @@ $SetPath$ has the following algorithm:
 
 $SetPath$ would be marked as noexcept and terminate on creating file failure or $Restore$ failure.
 
-$AddException(exception)$ has the following algorithm:
+$WithCatchingException(callback)$ has the following algorithm:
 \begin{itemize}
+	\item if $debug\_mode$ is $true$, call $callback$ and return
 	\item assert $path$ is not empty string (that is, $SetPath$ has been called before)
+	\item try to catch exceptions while calling $callback$
+	\item store in $exception$ variable a string containing the exception text (if string construction threw, return doing nothing)
 	\item initialize $prev\_count$ with zero
 	\item if $exception$ is found inside $exception\_frequency$ hashmap, assign $prev\_count$ to its frequency
+	\item initialize $prev\_time$ with zero
+	\item if $exception$ is found inside $exception\_last\_time$ hashmap, assign $prev\_time$ to its last appearance time
+	\item store $current\_time = store\_clock.GetTime()$
 	\item start try block A
-	\item add pair $(prev\_count + 1, exception)$ to $frequency\_exceptions$.
+	\item add pair $(prev\_count + 1, exception)$ to $frequency\_exception$
+	\item add pair $(current\_time, exception)$ to $last\_time\_exception$
 	\item replace value of $exception\_frequency[exception]$ with $prev\_count + 1$
-	\item if an exception is caught in try block A, delete  $(prev\_count + 1, exception)$ pair from $frequency\_exceptions$ and return from function doing nothing
-	\item if $prev\_count$ is move than zero, remove pair $(prev\_count, exception)$ from $frequency\_exception$ set
+	\item replace value of $exception\_last\_time[exception]$ with $current\_time$
+	\item if an exception is caught in try block A, delete  $(prev\_count + 1, exception)$ pair from $frequency\_exception$, delete $(current\_time, exception)$ pair from $last\_time\_exception$ and return from function doing nothing. This would help to preserve invariants on inner exception.
+	\item if $prev\_count$ is more than zero, remove pair $(prev\_count, exception)$ from \\
+		$frequency\_exception$ set
+	\item if $prev\_time$ is more than zero, remove pair $(prev\_time, exception)$ from \\
+		$last\_time\_exception$ set
+	\item call $RemoveOld(current\_time)$
 	\item call $Trim$
+	\item call $Dump$
 \end{itemize}
 
-$AddException$ cannot throw, it absorbs all its own exceptions and in case if any exception handled, $AddException$ may have no effect. Still, that is not a problem for the reason that the functionality of $AddException$ is not so important, thus we do not need to provide strict guarantees. Even if we wanted to provide some guarantees, we would fail for the reason that the function is forced to be noexcept, because it is called on handling some already happened exception stored in the $exception$ variable. Therefore, if other exception arises, we could have gone into infinite recursion handling it the same way.
+$AddException$ cannot throw, it absorbs all its own exceptions and in case if any exception handled, $AddException$ may have no effect. Still, that is not a problem for the reason that the functionality of $AddException$ is not so important, thus we do not need to provide strict guarantees. Even if we wanted to provide some guarantees, we would fail for the reason that the function is forced to be noexcept, because it is handling some already happened. Therefore, if other exception arises, we could have gone into infinite recursion handling it the same way.
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
@@ -1591,11 +1642,12 @@ private:
 
 \subsection{Low-overhead timers}
 
-Let us outline classes and methods for three algorithms described above:
+Let us outline classes and methods for several algorithms described above:
 \begin{itemize}
 	\item \fullref{subsec:low_overhead_periodic_timer}
 	\item \fullref{subsec:low_overhead_start_finish_timer}
 	\item \fullref{subsec:low_overhead_waiting_timer}
+	\item \fullref{subsec:low_overhead_periodic_clock}
 \end{itemize}
 
 \begin{lstlisting}
@@ -1620,13 +1672,13 @@ public:
 	void Start() noexcept;
 	void Finish() noexcept;
 	uint64_t GetCount() noexcept;
-	uint64_t GetDurationSum() noexcept;
+	int64_t GetDurationSum() noexcept;
 	void Reset() noexcept;
 private:
 	PeriodicTimer start_timer;
 	PeriodicTimer finish_timer;
 	uint64_t measurements_counter;
-	uint64_t duration_sum;
+	int64_t duration_sum;
 };
 class WaitingTimer {
 public:
@@ -1637,6 +1689,13 @@ private:
 	uint64_t time_period;
 	int64_t time_elapsed;
 	PeriodicTimer periodic_timer;
+};
+class PeriodicClock {
+public:
+	int64_t GetTime() const noexcept;
+private:
+	PeriodicTimer periodic_timer;
+	int64_t current_time;
 };
 \end{lstlisting}
 \subsection{Shadow-paging thread-wise sharder interface}
@@ -1768,41 +1827,6 @@ private:
 };
 \end{lstlisting}
 
-\subsection{Exception top proto storage interface}
-
-Here we are to outline classes and methods of $ExceptionTopKeeper$, which is defined in the section \fullref{subsec:exception_top_proto_storage}.
-
-We would use $ExceptionWithBacktrace$ class of exception defined further in the section \fullref{subsec:exception_with_backtrace}. This exception class accesses global $ExceptionTopKeeper$ instance in its constructor in order to register itself via $AddException$ method.
-
-\begin{lstlisting}
-class ExceptionTopKeeper {
-public:
-	void Dump() const noexcept;
-	// Dumps exception top to file in path
-
-	void Restore();
-	// Restores previous exception top from file
-
-	void SetPath(const std::string& new_path) noexcept;
-	// Sets path to new_path
-
-	void AddException(const ExceptionWithBacktrace& exception) noexcept;
-	// Adds exception to form top
-private:
-	std::string path;
-	std::unordered_map<ExceptionWithBacktrace, uint64_t, ExceptionWithBacktraceHasher> exception_frequency;
-	std::set<std::pair<uint64_t, ExceptionWithBacktrace>> frequency_exception;
-	WaitingTimer dump_timer;
-	static const size_t top_size;
-}
-\end{lstlisting}
-
-Let us also declare a global thread\_local instance of the class above
-
-\begin{lstlisting}
-thread_local ExceptionTopKeeper exception_top_keeper;
-\end{lstlisting}
-
 \subsection{Exception with backtrace}
 \label{subsec:exception_with_backtrace}
 
@@ -1819,20 +1843,12 @@ public:
 	//	human-readable concatenation in reason_with_backtrace,
 	//	catches inner exceptions and if caught, may leave
 	//	some of inner string fields empty
-	//	calls exception_top_keeper.AddException(*this) to
-	//	register current exception in the exception top structure
 
 	const std::string& GetStackStrace() const noexcept;
 	// returns backtrace;
 
 	const char* what() const noexcept;
 	// return reason_with_backtrace.c_str()
-
-	bool operator==(const ExceptionWithBacktrace& other) const noexcept;
-	// compares reason_with_backtrace fields
-
-	bool operator<(const ExceptionWithBacktrace& other) const noexcept;
-	// compares reason_with_backtrace fields
 
 	const std::string& GetReasonWithBacktrace() const noexcept;
 	// returns reason_with_backtrace
@@ -1843,13 +1859,42 @@ private:
 };
 \end{lstlisting}
 
-To be able to pass $ExceptionWithBacktrace$ as a hash key we need to build up $ExceptionWithBacktraceHasher$ class, which is the following:
+\subsection{Exception top proto storage interface}
+
+Here we are to outline classes and methods of $ExceptionTopKeeper$, which is defined in the section \fullref{subsec:exception_top_proto_storage}.
+
 \begin{lstlisting}
-struct ExceptionWithBacktraceHasher {
-	std::size_t operator()(const ExceptionWithBacktrace& exception) const noexcept {
-		return std::hash<std::string>()(exception.GetReasonWithBacktrace());
-	}
-};
+class ExceptionTopKeeper {
+public:
+	void Dump() const noexcept;
+
+	void Restore();
+
+	void Trim() noexcept;
+
+	void RemoveOld(const int64_t current_time) noexcept;
+
+	void SetPath(const std::string& new_path) noexcept;
+
+	template <typename Function>
+	void WithCatchingException(Function func) noexcept;
+private:
+	std::string path;
+	std::unordered_map<std::string, uint64_t> exception_frequency;
+	std::unordered_map<std::string, int64_t> exception_last_time;
+	std::set<std::pair<uint64_t, std::string>> frequency_exception;
+	std::set<std::pair<int64_t, std::string>> last_time_exception;
+	WaitingTimer dump_timer;
+	PeriodicClock store_clock;
+	static const size_t top_size;
+	static const int64_t keep_time;
+	static const debug_mode;
+}
+\end{lstlisting}
+
+Let us also declare a global thread\_local instance of the class above
+
+\begin{lstlisting}
+thread_local ExceptionTopKeeper exception_top_keeper;
 \end{lstlisting}
 \end{document}
-
