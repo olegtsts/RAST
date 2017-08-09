@@ -1280,6 +1280,60 @@ As it can easily be concluded, we do not have data races in $MessagePassingContr
 \end{samepage}
 All the requirements of sharder are satisfied.
 
+\subsection{Increasing hex identifier}
+\label{subsec:increasing_hex_identifier}
+
+This is simply an algorithm for generating string identifiers of the form f12f-abc3-12a4. We want our $HexIdGenerator$ to have increment method, which increments the identifier, and $GetHex$ method, which returns generated string. Strings should increase lexicographically on each increment.
+
+In order to do that let us introduce $HexToken$ class, which contains the following fields:
+\begin{itemize}
+	\item $index$ is a 16-byte integer number
+	\item $hex\_repr$ is a hex representation string
+\end{itemize}
+
+$HexToken$ would have the following methods:
+\begin{itemize}
+	\item $IsOver$ indicates whether $index$ reached its maximum, which is 65535.
+	\item $UpdateHexRepr$, which updates the representation of $index$ in hex string format and stores the result to $hex\_repr$ variable
+	\item $GetHex$, which returns reference to string $hex\_repr$
+	\item $operator\mbox{++}$, which increments the $index$ and calls $UpdateHexRepr$ to update hex representation
+\end{itemize}
+
+Methods $IsOver$ and $GetHex$ would be exception-free. As for the rest, if $UpdateHexRepr$ fails inside $operator\mbox{++}$, $operator\mbox{++}$ would still be retryable, it would increment $index$ again and call $UpdateHexRepr$ on next retrying call. That is, in case of failure we may increment $index$ by 2, missing $index + 1$ representation construction, but this does not break the invariant of increment operation to produce lexicographically larger strings. That is, function provides basic exception safety guarantee.
+
+Now let us consider $HexIdGenerator$, which stores the following information:
+\begin{itemize}
+	\item $hex\_tokens$ vector of $HexToken$ objects
+	\item $hex\_repr$, which stores full hex representation of the identifier
+\end{itemize}
+
+$HexIdGenerator$ would have the following functions:
+\begin{itemize}
+	\item $operator\mbox{++}$, which iterates the identifier
+	\item $GetHex$, which returns reference of string $hex\_repr$
+\end{itemize}
+
+$operator\mbox{++}$ would have the following algorithm:
+\begin{itemize}
+	\item iterate through all $hex\_token$ from vector $hex\_tokens$
+	\item if $hex\_token.IsOver()$ returns $false$, call $\mbox{++}hex\_token$, fix $hex\_repr$ by calling \\
+		$hex\_token.GetHex()$ and placing new hex string to the place in whole $hex\_repr$ where it belongs. Afterwards, return from function
+	\item if we reached to the end of the iteration through all $hex\_tokens$, then we have an identifier of the form ffff-ffff-ffff...
+	\item append 0000 to $hex\_repr$ if its length is not more, than $5 * hex\_tokes.size() - 1$
+	\item add new element to $hex\_tokens$ vector
+\end{itemize}
+
+$GetHex$ method of $HexIdGenerator$ would return reference to $hex\_repr$ and do nothing else. This method does not throw.
+
+As for $operator\mbox{++}$, it may throw. There are several cases:
+\begin{itemize}
+	\item $\mbox{++}hex\_token$ failed. In this case, the length of $hex\_repr$ remained unchanged. While it is unchanged, it consists of fixed amount of strings from $HexToken$, which are guaranteed to increase even in case of failures. That is, $hex\_repr$ also will be guaranteed to increase in this specific case
+	\item appending  0000 to $hex\_repr$ failed. In this case, function has no effect
+	\item adding new element to $hex\_tokens$ vector failed. In such a case, we would have a string of the form ffff-ffff-ffff-0000 and not updated vector of $hex\_tokens$. On the next retry of $operator\mbox{++}$, it will again find, that all $hex\_tokens$ are over, but this time we will not append 0000 to the $hex\_repr$, because of length check. Afterwards, function would finish appending element of $hex\_tokens$ and the structure would become consistent again.
+\end{itemize}
+
+That is, $operator\mbox{++}$ provides basic exception safety.
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
@@ -1906,4 +1960,36 @@ private:
 	Sharder<MessagePassingController<Args...>> sharder;
 };
 \end{lstlisting}
+\subsection{Increasing hex identifier interface}
+
+Here we are to outline an interface for \fullref{subsec:increasing_hex_identifier}
+
+\begin{lstlisting}
+class HexToken {
+private:
+	void UpdateHexRepr();
+public:
+	bool IsOver() const noexcept;
+
+	const std::string& GetHex() const noexcept;
+
+	HexToken& operator++();
+	// May throw, basic exception safety is provided
+private:
+	uint16_t index;
+	std::string hex_repr;
+};
+
+class HexIdGenerator {
+public:
+	const std::string& GetHex() const noexcept;
+
+	HexIdGenerator& operator++();
+	// May throw, basic exception safety is provided
+private:
+	std::vector<HexToken> hex_tokens;
+	std::string hex_repr;
+};
+\end{lstlisting}
+
 \end{document}
