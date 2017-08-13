@@ -1125,6 +1125,7 @@ The exception requirements:
 \end{itemize}
 
 \subsection{Dynamically-sharded message passing pool}
+\label{subsec:dynamically_sharded_message_passing_pool}
 
 In the section \fullref{subsec:shadow_page_thread_wise_sharder} we have discussed how to shard a job. However, what remained uncovered is how to separate some job into shards and how to do resharding process. In case of a uniform job, for example, calling function $Func$ for each element of some vector, the question of how to shard a job is rather simple. When a job is complicated, it can usually be represented as several distinct logic blocks, some of which use results of some other logical blocks and together they form a full algorithm. That is called a ``message passing''. We would have several distinct message processors, which can accept messages, process them, and send messages to another message processors.
 
@@ -1333,6 +1334,130 @@ As for $operator\mbox{++}$, it may throw. There are several cases:
 \end{itemize}
 
 That is, $operator\mbox{++}$ provides basic exception safety.
+
+\subsection{Finite state machine}
+
+In order to build a consensus algorithm over several different hosts we have to design a FSM it is going to use to synchronize data it works with. Finite state machine would be represented as an object of some class, which works with so called write-ahead-log, which is a list of updates, which are going to be applied to the final state.
+
+Our finite state machine is going to be used as part of \fullref{subsec:dynamically_sharded_message_passing_pool}, that is why it has to be designed as a \fullref{subsec:message_processor}
+
+Assume we already have $TState$ class, which represents an object state, and a $TUpdate$ class, which represents an update element, which can be applied to state by calling $update.Update(state)$. Also, update can be reverted by calling $update.Revert(state)$.
+
+Let us introduce a class $FSMMP<TController, TState, TUpdate>$, which is inherited from $MessageProcessorBase$. $TController$ represents another message processor type, which is controlling current state machine processor by sending messages.
+
+$FSMMP$ will store the following data:
+\begin{itemize}
+	\item $write\_ahead\_log$, which is a list of $std::unique\_ptr<TUpdate>$ objects
+	\item $cleanup\_border$, which is a list iterator pointing at $write\_ahead\_log$ element, up to which the WAL can be cleaned up
+	\item $applied\_border$, which is a list iterator pointing to the state, which is going to be applied next
+	\item $state$ of type $TState$
+\end{itemize}
+
+For the sake of the communication with $FSMMP$ we would have to introduce several helping message classes:
+\begin{itemize}
+	\item $FSMCommitMesssage$ is used for passing commit operation to clean up the WAL
+	\item $FSMUpdatesMessage<TUpdate>$ is used for passing updates to the WAL
+	\item $GetFSMUpcomingUpdateMessage$ is used to retrieve upcoming updates from the WAL
+	\item $FSMUpcomingRevertMessage$ is used to revert upcoming updates from WAL
+\end{itemize}
+
+$FSMCommitMesssage$ is a dumb class, it contains nothing.
+
+$FSMUpdatesMessage<TUpdate>$ contains the following information:
+\begin{itemize}
+	\item $updates$, which is a list of $TUpdate$ instances
+\end{itemize}
+
+$GetFSMUpcomingUpdateMessage$ and $FSMUpcomingRevertMessage$ are dumb classes.
+
+The class $FSMMP$ itself would have the following methods:
+\begin{itemize}
+	\item $Cleanup$, which tries to clean the WAL
+	\item $Comeup$, which tries to apply updates from $write\_ahead\_log$
+	\item $Commit$, which marks queue elements to be deleted
+	\item $AddUpdates(updates)$ adds updates to the end of the WAL
+	\item $Revert$, which reverts all upcoming updates from the WAL
+	\item $Receive(ReceivingFrom<TController>(), commit, sender)$, which receives a commit message. $commit$ is an instance of $FSMCommitMesssage$.
+	\item $Receive(ReceivingFrom<TController>(), add\_updates, sender)$, which receives a message to add updates from controller. $add\_updates$ is an instance of $FSMUpdatesMessage$.
+	\item $Receive(ReceivingFrom<TController>(), get\_upcoming\_update, sender)$, which requests to receive upcoming updates. $get\_upcoming\_updates$ in an instance of \\
+		$GetFSMUpcomingUpdateMessage$.
+	\item $Receive(ReceivingFrom<TController>(), revert, sender)$, which requests to revert upcoming updates from the WAL. $revert$ is an instance of $FSMUpcomingRevertMessage$.
+\end{itemize}
+
+The $Cleanup$ method does the following:
+\begin{itemize}
+	\item while $write\_ahead\_log.begin() != cleanup\_border$, does $pop\_front$
+\end{itemize}
+
+$Cleanup$ method does not throw.
+
+The $Comeup$ method does the following:
+\begin{itemize}
+	\item if $applied\_border$ equals $write\_ahead\_log.end()$, does nothing
+	\item takes an update $applied\_border$ is pointing at
+	\item calls $update \rightarrow Update(state)$
+	\item increments $applied\_border$
+	\item calls $Cleanup$
+\end{itemize}
+
+$Comeup$ method may throw in case of $Update$ failure. For this reason, it requires $Update$ method to be retryable on failure, that is, to provide basic exception safety. In such a case, $Comeup$ method is also retryable and guarantees basic exception safety.
+
+The $Commit$ method does the following:
+\begin{itemize}
+	\item assigns $cleanup\_border$ to $write\_ahead\_log.end()$
+\end{itemize}
+
+$Commit$ method does not throw.
+
+The $AddUpdates(updates)$ method does the following:
+\begin{itemize}
+	\item if $applied\_border$ equals $write\_ahead\_log.end()$, assigns it to $add\_updates.begin()$
+	\item if $cleanup\_border$ equals $write\_ahead\_log.end()$, assigns it to $add\_updates.begin()$
+	\item $write\_ahead\_log.splice(write\_ahead\_log.end(), std::move(add\_updates.updates))$
+\end{itemize}
+
+$AddUpdates$ does not throw.
+
+The $Revert$ method does the following:
+\begin{itemize}
+	\item while $applied\_border$ is not equal to $write\_ahead\_log.begin()$
+	\item stores to another variable $last\_update$ iterator, which precedes $applied\_border$
+	\item calls $last\_update \rightarrow Revert(state)$
+	\item assigns $applied\_border$ to $last\_update$
+\end{itemize}
+
+$Revert$ method requires $Revert$ method of $last\_update$ to provide basic exception safety and be retryable. In such a case, it also guarantees basic exception safety and is also retryable.
+
+$Receive(ReceivingFrom<TController>(), commit, sender)$ method does the following:
+\begin{itemize}
+	\item calls $Commit()$
+\end{itemize}
+
+This message processing does not throw.
+
+$Receive(ReceivingFrom<TController>(), add\_updates, sender)$ method does the following:
+\begin{itemize}
+	\item calls $AddUpdates(add\_updates.updates)$
+	\item calls $Commit()$
+\end{itemize}
+
+This message processing does not throw.
+
+$Receive(ReceivingFrom<TController>(), get\_upcoming\_update, sender)$ method does the following:
+\begin{itemize}
+	\item creates empty $fsm\_updates$ of type $FSMUpdatesMessage$
+	\item fills $fsm\_updates \rightarrow updates$ list with states from iterator $cleanup\_border$ to the end
+	\item calls $sender.Send<TController>(updates)$
+\end{itemize}
+
+This message processing may throw on allocating new $fsm\_updates$, and may throw in $sender.Send<TController>(updates)$. In either cases, method has no effect. This implies it guarantees strong exception safety.
+
+$Receive(ReceivingFrom<TController>(), revert, sender)$ method does the following:
+\begin{itemize}
+	\item calls $Revert$
+\end{itemize}
+
+This message processing provides basic exception safety and is retryable.
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
