@@ -1336,6 +1336,7 @@ As for $operator\mbox{++}$, it may throw. There are several cases:
 That is, $operator\mbox{++}$ provides basic exception safety.
 
 \subsection{Finite state machine}
+\label{subsec:finite_state_machine}
 
 In order to build a consensus algorithm over several different hosts we have to design a FSM it is going to use to synchronize data it works with. Finite state machine would be represented as an object of some class, which works with so called write-ahead-log, which is a list of updates, which are going to be applied to the final state.
 
@@ -2117,4 +2118,56 @@ private:
 };
 \end{lstlisting}
 
+\subsection{Finite state machine interface}
+
+Here we are to outline an interface for \fullref{subsec:finite_state_machine}.
+
+\begin{lstlisting}
+class FSMCommitMessage {};
+
+class GetFSMUpcomingUpdateMessage {};
+
+class FSMUpcomingRevertMessage {};
+
+template <typename TUpdate>
+class FSMUpdatesMessage {
+public:
+	std::list<std::unique_ptr<TUpdate>> updates;
+};
+
+template <typename TController, typename TState, typename TUpdate>
+class FSMMP {
+public:
+	void Cleanup() noexcept;
+
+	void Comeup();
+	// May throw, basic exception safety
+
+	void Commit() noexcept;
+
+	void AddUpdates(std::list<std::unique_ptr<TUpdate>&) noexcept;
+
+	void Revert();
+	// May throw, basic exception safety
+
+	<template Sender>
+	void Receive(const ReceivingFrom<TController>&, const FSMCommitMessage&, const Sender& sender) noexcept;
+
+	<template Sender>
+	void Receive(const ReceivingFrom<TController>&, const FSMUpdatesMessage&, const Sender& sender) noexcept;
+
+	<template Sender>
+	void Receive(const ReceivingFrom<TController>&, const GetFSMUpcomingUpdateMessage&, const Sender& sender);
+	// May throw, basic exception safety
+
+	<template Sender>
+	void Receive(const ReceivingFrom<TController>&, const FSMUpcomingRevertMessage&, const Sender& sender);
+	// May throw, basic exception safety
+private:
+	std::list<std::unique_ptr<TUpdate>> write_ahead_log;
+	typename std::list<std::unique_ptr<TUpdate>>::iterator cleanup_border;
+	typename std::list<std::unique_ptr<TUpdate>>::iterator applied_border;
+	TState state;
+};
+\end{lstlisting}
 \end{document}
