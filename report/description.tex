@@ -1460,6 +1460,29 @@ $Receive(ReceivingFrom<TController>(), revert, sender)$ method does the followin
 
 This message processing provides basic exception safety and is retryable.
 
+\subsection{RAFT Core}
+
+In order to synchronize state between several hosts, we are to build up a Replicate State Machine using RAFT algorithm.
+
+Let us introduce $RAFTCoreMP$ class, which is a \fullref{subsec:message_processor}, which controls consensus algorithms.
+
+$RAFTCoreMP$ stores the following data:
+\begin{itemize}
+	\item $election\_timer$, which is a \fullref{subsec:low_overhead_waiting_timer}
+	\item $heartbeat\_timer$, which is also a $WaitingTimer$
+	\item $state$, which is a enum with possible values $follower$, $candidate$ and $leader$
+	\item $current\_term$, which is a number of term of node
+	\item $votes\_count$, which is a votes count needed during leader election
+\end{itemize}
+
+We would also introduce several message classes used in order to communicate with $RAFTCoreMP$:
+\begin{itemize}
+	\item $RequestVote$, which is used to ask for a vote in case if some other host is processing a leader election
+	\item $ResponseVode$, which is used to respond on vote
+	\item $Masterbeat$, which contains update, transferred from master to slave hosts
+	\item $FollowerResponse$, which is a response to $Masterbeat$
+\end{itemize}
+
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
 
