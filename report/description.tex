@@ -1464,7 +1464,7 @@ This message processing provides basic exception safety and is retryable.
 
 In order to synchronize state between several hosts, we are to build up a Replicate State Machine using RAFT algorithm.
 
-Let us introduce $RAFTCoreMP$ class, which is a \fullref{subsec:message_processor}, which controls consensus algorithm.
+Let us introduce $RAFTCoreMP<TController>$ class, which is a \fullref{subsec:message_processor}, which controls consensus algorithm.
 
 We would also introduce several message classes used in order to communicate with $RAFTCoreMP$:
 \begin{itemize}
@@ -1477,7 +1477,9 @@ We would also introduce several message classes used in order to communicate wit
 	\item $GetMasterInfoMessage$, which is a request to give out current WAL state
 	\item $MasterCommitMessage$, which forces trying to commit upcoming update and place in to the WAL
 	\item $GetNextEnrtyMessage$, which is a request to give out first not applied WAL entry
+	\item $NextEntryMessage$, which is a response to $GetNextEnrtyMessage$, containing requested WAL entry
 	\item $MarkAppliedMessage$, which is a request to mark specific transaction as applied
+	\item $HostInfo$, which is a class describing information about hosts
 \end{itemize}
 
 $RequestVoteMessage$ and $ResponseVoteMessage$ both contain $vote\_term$.
@@ -1508,12 +1510,23 @@ $MasterInfoMessage$ contains the following data:
 
 $GetMasterInfoMessage$, $MasterCommitMessage$ and $GetNextEnrtyMessage$ are dumb classes.
 
-$MarkAppliedMessage$ contains the following data:
+$NextEntryMessage$ contains the following data:
 \begin{itemize}
-	\item $transaction\_id$ of message to mark read
+	\item $update$ of type $RaftWalEntry$
 \end{itemize}
 
-$RAFTCoreMP$ stores the following data:
+$MarkAppliedMessage$ contains the following data:
+\begin{itemize}
+	\item $transaction\_id$ of WAL entry to mark applied
+\end{itemize}
+
+$HostInfo$ contains the following data:
+\begin{itemize}
+	\item $max\_applied\_transaction\_id$, which is an identifier of WAL entry another host successfully applied
+	\item $max\_saved\_transaction\_id$, which is an identifier of WAL entry another host successfully applied
+\end{itemize}
+
+Now let us return to the description of the class$RAFTCoreMP$. It stores the following data:
 \begin{itemize}
 	\item $election\_timer$, which is a \fullref{subsec:low_overhead_waiting_timer}
 	\item $heartbeat\_timer$, which is also a $WaitingTimer$
@@ -1526,9 +1539,64 @@ $RAFTCoreMP$ stores the following data:
 	\item $upcoming\_update$ is an instance of $RaftWalEntry$, which stores new forming update
 	\item $max\_applied$ is an iterator to the WAL, which points to the last applied entry
 	\item $max\_fixed$ is an iterator to the WAL, which points to the last entry, which is successfully saved to quorum
-	\item $max\_saved$ is an iterator to the WAL, which points to the last saved entry
+	\item $hosts\_info$ is an unordered map with hosts as keys and $HostInfo$ objects as values
 \end{itemize}
 
+$RAFTCoreMP$ has the following methods:
+\begin{itemize}
+	\item $UpdateTerm(new\_term)$, which updates $current\_term$
+	\item $UpdateIterator(new\_updates)$, which helps to update iterators while adding new updates
+	\item $Receive(ReceivingFrom<TController>(), request\_vote\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), response\_vote\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), master\_beat\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), follower\_response\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), get\_master\_info\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), master\_commit\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), get\_next\_entry\_message, sender)$
+	\item $Receive(ReceivingFrom<TController>(), mark\_applied\_message, sender)$
+\end{itemize}
+
+$UpdateTerm(new\_term)$ does the following:
+\begin{itemize}
+	\item if $new\_term \leq current\_term$, does nothing
+	\item deletes from $write\_ahead\_log$ all entries after $max\_fixed$
+	\item updates $current\_term$ to $new\_term$
+	\item sets $state$ to $follower$
+\end{itemize}
+
+$UpdateIterator(new\_updates)$ does the following:
+\begin{itemize}
+	\item for each of iterators $max\_applied$, $max\_fixed$, $max\_saved$ if iterator equals $write\_ahead\_log.end()$, updates it to $new\_updates.begin()$
+\end{itemize}
+
+$Receive(ReceivingFrom<TController>(), request\_vote\_message, sender)$ does the following:
+\begin{itemize}
+	\item if $request\_vote\_message.vote\_term <= current\_term$, does nothing
+	\item calls $UpdateTerm(request\_vote\_message.vote\_term)$
+	\item sends $ResponseVoteMessage(current\_term)$ to $TController$
+\end{itemize}
+
+$Receive(ReceivingFrom<TController>(), response\_vote\_message, sender)$ does the following:
+\begin{itemize}
+	\item if $state$ is not a $candidate$, does nothing
+	\item increases $votes\_count$
+	\item if $votes\_count$ is more than $hosts\_info.size() / 2$, updates $state$ to $leader$
+\end{itemize}
+
+$Receive(ReceivingFrom<TController>(), master\_beat\_message, sender)$ does the following:
+\begin{itemize}
+	\item create new empty list $added\_updates$ of $RaftWalEntry$ instances
+	\item fill $added\_updates$ with entries of $master\_beat\_message.write\_ahead\_log$, which have $transaction\_id$ more, than $max\_saved->transaction\_id$
+	\item calls $UpdateIterator(added\_updates)$
+	\item calls $write\_ahead\_log.splice(write\_ahead\_log.end(), added\_updates)$
+\end{itemize}
+
+%$Receive(ReceivingFrom<TController>(), follower\_response\_message, sender)$ does the following:
+%\begin{itemize}
+%	\item update $hosts\_info[follower\_response\_message.hostname].max\_saved\_transaction\_id$ to $follower\_response\_message.max\_saved\_transaction\_id$
+%	\item calculate $min\_max\_saved\_transaction\_id$, which is a  minimum of $max\_saved\_transaction\_id$ for all hosts in $hosts\_info$
+%	\item if $max\_fixed < write\_ahead\_log.end()$ and next WAL entry after $max\_fixed$ has $transaction\_id$, which is less, than $min\_max\_saved\_transaction\_id$
+%\end{itemize}
 
 \newpage
 \section{Detailed Code Architecture (classes and methods)}
