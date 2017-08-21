@@ -859,11 +859,11 @@ It would have the only method $GetTime$, which does the following:
 
 
 
-\subsection{Sorted values mapping}
-\label{sorted_values_mapping}
+\subsection{Ranked map}
+\label{ranked_map}
 
 Here we are to introduce a container \\
-$SortedValuesMapping<TKey, TValue, THash=std{::}hash<Key>>$, which stores key-value mapping as well as maintains a sorted order on values.
+$RankedMap<TKey, TValue, THash=std{::}hash<Key>>$, which stores key-value mapping as well as maintains a sorted order on values.
 
 There are the following requirements on template class arguments:
 \begin{itemize}
@@ -872,13 +872,13 @@ There are the following requirements on template class arguments:
 	\item $TValue$ should have comparator $operator{<}$
 \end{itemize}
 
-$SortedValuesMapping$ would store the following data:
+$RankedMap$ would store the following data:
 \begin{itemize}
 	\item $key\_value$ is an $std{::}ordered\_map{<}TKey, TValue, THash{>}$, which stores key value mapping
 	\item $value\_key\_pairs$ is a $std{::}set{<}std{::}pair{<}TValue, TKey{>}{>}$, which stores $(value, key)$ pairs
 \end{itemize}
 
-$SortedValuesMapping$ would have the following functions:
+$RankedMap$ would have the following functions:
 \begin{itemize}
 	\item $Find(key)$, which returns iterator of underlaying $key\_value$ container, pointing at key $key$
 	\item $begin$, which returns iterator to start of underlaying $key\_value$ object
