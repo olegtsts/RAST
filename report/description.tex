@@ -857,6 +857,74 @@ It would have the only method $GetTime$, which does the following:
 	\item returns $current\_time$
 \end{itemize}
 
+
+
+\subsection{Sorted values mapping}
+\label{sorted_values_mapping}
+
+Here we are to introduce a container \\
+$SortedValuesMapping<TKey, TValue, THash=std{::}hash<Key>>$, which stores key-value mapping as well as maintains a sorted order on values.
+
+There are the following requirements on template class arguments:
+\begin{itemize}
+	\item $THash$ should have $operator()$ function, which accepts $TKey$ instance and returns hash function value
+	\item $TKey$ should have comparators $operator{==}$, $operator{<}$
+	\item $TValue$ should have comparator $operator{<}$
+\end{itemize}
+
+$SortedValuesMapping$ would store the following data:
+\begin{itemize}
+	\item $key\_value$ is an $std{::}ordered\_map{<}TKey, TValue, THash{>}$, which stores key value mapping
+	\item $value\_key\_pairs$ is a $std{::}set{<}std{::}pair{<}TValue, TKey{>}{>}$, which stores $(value, key)$ pairs
+\end{itemize}
+
+$SortedValuesMapping$ would have the following functions:
+\begin{itemize}
+	\item $Find(key)$, which returns iterator of underlaying $key\_value$ container, pointing at key $key$
+	\item $begin$, which returns iterator to start of underlaying $key\_value$ object
+	\item $end$, which returns iterator to end of underlaying $key\_value$ object
+	\item $GetLowest()$, which returns iterator of underlaying $key\_value$ object, pointing at key with least $value$
+	\item $Erase(key)$, which erases $key$ from container
+	\item $Update(key, value)$, which updates previous value of $key$ to current given $value$
+\end{itemize}
+
+$Find(key)$, $begin$ and $end$ methods simply call underlaying $key\_value$ corresponding methods. These methods do not throw.
+
+$GetLowest$ method does the following:
+\begin{itemize}
+	\item if there are zero elements in $value\_key\_pairs$, returns result of $end()$ call
+	\item gets first pair from $value\_key\_pairs$, get its $key$
+	\item returns result of $Find(key)$ call
+\end{itemize}
+
+$GetLowest$ does not throw.
+
+$Erase(key)$ does the following:
+\begin{itemize}
+	\item calls $key\_value.find(key)$ and stores result in variable $it$
+	\item if $it$ equals $key\_value.end()$, returns doing nothing else
+	\item saves $pair = std{::}make\_pair(it\rightarrow second, key)$
+	\item calls $key\_value.erase(key)$
+	\item calls $value\_key\_pairs.erase(pair)$
+\end{itemize}
+
+$Erase(key)$ may throw, provides strong exception safety.
+
+$Update(key, value)$ does the following:
+\begin{itemize}
+	\item calls $key\_value.find(key)$ and stores result in variable $iterator$
+	\item if $iterator$ is not equal to $key\_value.end()$, creates pair \\
+		$old\_pair = std{::}make\_pair(iterator\rightarrow second, iterator\rightarrow first)$
+	\item creates pair $pair = std{::}make\_pair(key, value)$
+	\item starts try block A
+	\item inserts $pair$ into $value\_key\_pairs$
+	\item updates $key\_value[key] = value$
+	\item in case of try block A failure, erases $pair$ from $value\_key\_pair$, rethrow
+	\item if $iterator$ is not equal to $key\_value.end()$, calls $value\_key\_pair.erase(old\_pair)$
+\end{itemize}
+
+$Update$ may throw, provides strong exception safety.
+
 \subsection{Exception top proto storage}
 \label{subsec:exception_top_proto_storage}
 In order to make it simple for users to administrate the system, let us somehow notify users about exception thrown. Here we face a problem if some exception is thrown a lot of times, it becomes hard to distinguish it from other exceptions. Hence, it is better to store the same exception once with its appearance count. To avoid a lot of memory spent on storing exceptions, let us store only limited top of ones, since it is highly unlikely that any user would ever need to examine over thousand distinct exceptions without fixing the most frequent ones at first.
@@ -1586,7 +1654,7 @@ $Receive(ReceivingFrom<TController>(), response\_vote\_message, sender)$ does th
 $Receive(ReceivingFrom<TController>(), master\_beat\_message, sender)$ does the following:
 \begin{itemize}
 	\item create new empty list $added\_updates$ of $RaftWalEntry$ instances
-	\item fill $added\_updates$ with entries of $master\_beat\_message.write\_ahead\_log$, which have $transaction\_id$ more, than $max\_saved->transaction\_id$
+	\item fill $added\_updates$ with entries of $master\_beat\_message.write\_ahead\_log$, which have $transaction\_id$ more, than $max\_saved\rightarrow transaction\_id$
 	\item calls $UpdateIterator(added\_updates)$
 	\item calls $write\_ahead\_log.splice(write\_ahead\_log.end(), added\_updates)$
 \end{itemize}
