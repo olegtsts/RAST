@@ -2,7 +2,7 @@
 #include <tuple>
 
 constexpr int MAX_MEM_LAYERS = 50;
-constexpr int MEM_ALLOCATED_AT_ONCE = 100;
+constexpr int MEM_ALLOCATED_AT_ONCE = 1000000;
 
 struct FrontControl {
     size_t data_size;
