@@ -2,7 +2,7 @@
 #include <tuple>
 
 constexpr int MAX_MEM_LAYERS = 50;
-constexpr int MEM_ALLOCATED_AT_ONCE = 1000000;
+constexpr int MEM_ALLOCATED_AT_ONCE = 10000000;
 
 struct FrontControl {
     size_t data_size;
@@ -10,6 +10,7 @@ struct FrontControl {
     FrontControl* local_prev;
     size_t offset;
     size_t total_size;
+    int source_layer;
     bool is_owned;
 };
 
@@ -35,7 +36,7 @@ public:
 
     template <typename T>
     T* Allocate(const size_t size) {
-        reinterpret_cast<T*>(Allocate(size * sizeof(T)));
+        return reinterpret_cast<T*>(Allocate(size * sizeof(T)));
     }
 
     template <typename T >
@@ -58,7 +59,7 @@ public:
     FixedFreeListMultiLevelAllocator(const FixedFreeListMultiLevelAllocator&) noexcept {
     }
     T* allocate (const size_t n, const void* hint = nullptr) {
-        global_allocator.Allocate<T>(n);
+        return global_allocator.Allocate<T>(n);
     }
     void deallocate (T* p, size_t n) noexcept {
         global_allocator.Deallocate(p);
