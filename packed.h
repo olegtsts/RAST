@@ -5,6 +5,12 @@
 
 template <int NumberOfInts, typename ... Args>
 class Packed {
+public:
+    Packed() {
+        for (size_t i = 0; i < (NumberOfInts + 7) / 8; ++i) {
+            data[i] = 0;
+        }
+    }
 protected:
     void GetInternal() {}
     void SetInternal() {}
@@ -34,11 +40,13 @@ protected:
     using Packed<NumberOfInts, Args...>::data;
     using Packed<NumberOfInts, Args...>::GetInternal;
     using Packed<NumberOfInts, Args...>::SetInternal;
+
     typename StoreClass::NameClass::VarType GetInternal(const TypeSpecifier<typename StoreClass::NameClass>&) const {
         uint64_t place_to_read = *reinterpret_cast<uint64_t const *>(reinterpret_cast<char const *>(&data[0]) + StoreClass::store_begin);
         place_to_read &= ~(((1llu << ((8 - StoreClass::store_end + StoreClass::store_begin) * 8)) - 1) << (
                 (StoreClass::store_end - StoreClass::store_begin) * 8));
-        return *reinterpret_cast<typename StoreClass::NameClass::VarType const *>(&place_to_read);
+        typename StoreClass::NameClass::VarType const * res = reinterpret_cast<typename StoreClass::NameClass::VarType const *>(&place_to_read);
+        return *res;
     }
     void SetInternal(const TypeSpecifier<typename StoreClass::NameClass>&, const typename StoreClass::NameClass::VarType& value) {
         uint64_t& place_to_modify = *reinterpret_cast<uint64_t *>(reinterpret_cast<char *>(data) + StoreClass::store_begin);
@@ -46,6 +54,10 @@ protected:
         place_to_modify |= *reinterpret_cast<uint64_t const *>(&value) & ((1llu << ((StoreClass::store_end - StoreClass::store_begin) * 8)) - 1);
     }
 public:
+    Packed()
+        : Packed<NumberOfInts, Args...>()
+    {}
+
     template <typename SomeNameClass>
     typename SomeNameClass::VarType Get() const {
         return GetInternal(TypeSpecifier<SomeNameClass>());
