@@ -1,6 +1,5 @@
 #include "allocator.h"
 #include <algorithm>
-#include <cmath>
 #include <string>
 #include <sstream>
 
@@ -22,7 +21,7 @@ size_t FreeListMultiLevelAllocator::GetLog2(size_t number) {
 }
 
 void FreeListMultiLevelAllocator::Attach(FrontControl* front_control) {
-    size_t layer = GetLog2(front_control->data_size);
+    size_t layer = std::min(static_cast<size_t>(front_control->source_layer), GetLog2(front_control->data_size));
     front_control->local_prev = nullptr;
     front_control->local_next = layers[layer];
     if (layers[layer] != nullptr) {
@@ -32,7 +31,7 @@ void FreeListMultiLevelAllocator::Attach(FrontControl* front_control) {
 }
 
 void FreeListMultiLevelAllocator::Detach(FrontControl* front_control) {
-    size_t layer = GetLog2(front_control->data_size);
+    size_t layer = std::min(static_cast<size_t>(front_control->source_layer), GetLog2(front_control->data_size));
     if (front_control->local_prev != nullptr) {
         front_control->local_prev->local_next = front_control->local_next;
     }
@@ -69,6 +68,7 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
         second_front_control->local_prev = nullptr;
         second_front_control->offset = front_control->offset + sizeof(FrontControl) + first_size + sizeof(BackControl);
         second_front_control->total_size = front_control->total_size;
+        second_front_control->source_layer = front_control->source_layer;
         second_front_control->is_owned = true;
         second_back_control->front_control = second_front_control;
         front_control->data_size = first_size;
@@ -81,21 +81,18 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
 void* FreeListMultiLevelAllocator::Allocate(const size_t size) {
     size_t layer = GetLog2(size);
     if (layers[layer] == nullptr) {
-        size_t one_block_size = (pow(2, layer + 1) - 1) + sizeof(FrontControl) + sizeof(BackControl);
-        size_t blocks_count = std::max(static_cast<size_t>(1), MEM_ALLOCATED_AT_ONCE / one_block_size);
-        char* arena = new char[blocks_count * one_block_size];
-        for (size_t offset = 0; offset < blocks_count * one_block_size; offset += one_block_size) {
-            FrontControl* front_control = reinterpret_cast<FrontControl*>(arena + offset);
-            BackControl* back_control = reinterpret_cast<BackControl*>(arena + one_block_size - sizeof(BackControl));
-            front_control->data_size = one_block_size - sizeof(FrontControl) - sizeof(BackControl);
-            front_control->local_prev = nullptr;
-            front_control->local_next = nullptr;
-            front_control->offset = offset % one_block_size;
-            front_control->total_size = one_block_size;
-            front_control->is_owned = true;
-            back_control->front_control = front_control;
-            Attach(front_control);
-        }
+        char* arena = new char[MEM_ALLOCATED_AT_ONCE];
+        FrontControl* front_control = reinterpret_cast<FrontControl*>(arena);
+        BackControl* back_control = reinterpret_cast<BackControl*>(arena + MEM_ALLOCATED_AT_ONCE - sizeof(BackControl));
+        front_control->data_size = MEM_ALLOCATED_AT_ONCE - sizeof(FrontControl) - sizeof(BackControl);
+        front_control->local_prev = nullptr;
+        front_control->local_next = nullptr;
+        front_control->offset = 0;
+        front_control->total_size = MEM_ALLOCATED_AT_ONCE;
+        front_control->source_layer = layer;
+        front_control->is_owned = true;
+        back_control->front_control = front_control;
+        Attach(front_control);
     }
     FrontControl* front_control = layers[layer];
     SplitBlock(front_control, size);
