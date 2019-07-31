@@ -32,8 +32,8 @@ allocator_benchmark_4.o: allocator_benchmark_4.cpp
 	g++-7 allocator_benchmark_4.cpp -g -c -std=c++1z -O3 -pedantic -Wall
 
 allocator.o: allocator.cpp allocator.h
-  g++-7 allocator.cpp -g -c -std=c++1z -O3 -pedantic -Wall
-  
+	g++-7 allocator.cpp -g -c -std=c++1z -O3 -pedantic -Wall
+
 packed_test.o: packed_test.cpp
 	g++-7 packed_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall
 
