@@ -16,6 +16,14 @@ public:
     using VarType=bool;
 };
 
+class SelfPointer;
+using SelfPointerExampleClass=Packed<6, Param<SelfPointer, 0, 6>>;
+class SelfPointer {
+public:
+    using VarType=SelfPointerExampleClass*;
+};
+
+
 int main() {
     Packed<13,
            Param<FirstPointer, 0, 6>,
@@ -28,5 +36,8 @@ int main() {
     packed.Set<Boolean>(true);
     std::cout << "size = " << sizeof(packed) << std::endl;
     std::cout << *packed.Get<FirstPointer>() << " " << *packed.Get<SecondPointer>() << " " << packed.Get<Boolean>() << std::endl;
+    SelfPointerExampleClass self_pointer_class;
+    self_pointer_class.Set<SelfPointer>(&self_pointer_class);
+    std::cout << &self_pointer_class << " " << self_pointer_class.Get<SelfPointer>() << std::endl;
     return 0;
 }

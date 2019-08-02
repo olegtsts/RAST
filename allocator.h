@@ -1,6 +1,8 @@
 #pragma once
 #include <tuple>
 
+#include "packed.h"
+
 constexpr int MAX_MEM_LAYERS = 50;
 constexpr int MEM_ALLOCATED_AT_ONCE = 10000000;
 
@@ -8,13 +10,40 @@ constexpr int FIRST_BLOCK_BIT = 1;
 constexpr int LAST_BLOCK_BIT = 2;
 constexpr int IS_OWNED_BIT = 4;
 
-struct FrontControl {
-    size_t data_size;
-    FrontControl* local_next;
-    FrontControl* local_prev;
-    int source_layer;
-    // State which has bits FIRST_BLOCK_BIT, LAST_BLOCK_BIT, IS_OWNED_BIT
-    int state;
+class FCDataSize {
+public:
+    using VarType=size_t;
+};
+
+class FCLocalNext;
+
+class FCLocalPrev;
+
+class FCSourceLayer {
+public:
+    using VarType=unsigned int;
+};
+
+class FCState {
+public:
+    using VarType=unsigned int;
+};
+
+using FrontControl=Packed<20,
+      Param<FCDataSize, 0, 6>,
+      Param<FCLocalNext, 6, 12>,
+      Param<FCLocalPrev, 12, 18>,
+      Param<FCSourceLayer, 18, 19>,
+      Param<FCState, 19, 20>>;
+
+class FCLocalNext {
+public:
+    using VarType=FrontControl*;
+};
+
+class FCLocalPrev {
+public:
+    using VarType=FrontControl*;
 };
 
 struct BackControl {
