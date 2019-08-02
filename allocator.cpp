@@ -117,7 +117,9 @@ void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
     if (!(front_control->Get<FCState>() & LAST_BLOCK_BIT)) {
         FrontControl* following_front_control = reinterpret_cast<FrontControl*>(
             reinterpret_cast<char*>(pointer) + front_control->Get<FCDataSize>() + sizeof(BackControl));
-        Join(front_control, following_front_control);
+        if (following_front_control->Get<FCState>() & IS_OWNED_BIT) {
+            Join(front_control, following_front_control);
+        }
     }
 }
 
