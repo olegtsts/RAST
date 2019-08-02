@@ -53,6 +53,7 @@ void FreeListMultiLevelAllocator::Join(FrontControl* first_block, FrontControl* 
     Detach(first_block);
     Detach(second_block);
     GetBackControl(second_block)->front_control = first_block;
+    first_block->state |= second_block->state;
     first_block->data_size += sizeof(BackControl) + sizeof(FrontControl) + second_block->data_size;
     Attach(first_block);
 }
@@ -66,12 +67,11 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
         second_front_control->data_size = front_control->data_size - first_size - sizeof(BackControl) - sizeof(FrontControl);
         second_front_control->local_next = nullptr;
         second_front_control->local_prev = nullptr;
-        second_front_control->offset = front_control->offset + sizeof(FrontControl) + first_size + sizeof(BackControl);
-        second_front_control->total_size = front_control->total_size;
+        second_front_control->state = front_control->state & ~FIRST_BLOCK_BIT;
         second_front_control->source_layer = front_control->source_layer;
-        second_front_control->is_owned = true;
         second_back_control->front_control = second_front_control;
         front_control->data_size = first_size;
+        front_control->state &= ~LAST_BLOCK_BIT;
         first_back_control->front_control = front_control;
         Attach(front_control);
         Attach(second_front_control);
@@ -87,16 +87,14 @@ void* FreeListMultiLevelAllocator::Allocate(const size_t size) {
         front_control->data_size = MEM_ALLOCATED_AT_ONCE - sizeof(FrontControl) - sizeof(BackControl);
         front_control->local_prev = nullptr;
         front_control->local_next = nullptr;
-        front_control->offset = 0;
-        front_control->total_size = MEM_ALLOCATED_AT_ONCE;
+        front_control->state = FIRST_BLOCK_BIT | LAST_BLOCK_BIT | IS_OWNED_BIT;
         front_control->source_layer = layer;
-        front_control->is_owned = true;
         back_control->front_control = front_control;
         Attach(front_control);
     }
     FrontControl* front_control = layers[layer];
     SplitBlock(front_control, size);
-    front_control->is_owned = false;
+    front_control->state &= ~IS_OWNED_BIT;
     Detach(front_control);
 
     void* allocated_pointer = reinterpret_cast<void*>(reinterpret_cast<char*>(front_control) + sizeof(FrontControl));
@@ -106,17 +104,17 @@ void* FreeListMultiLevelAllocator::Allocate(const size_t size) {
 void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
     FrontControl* front_control = reinterpret_cast<FrontControl*>(reinterpret_cast<char*>(pointer) - sizeof(FrontControl));
     Attach(front_control);
-    front_control->is_owned = true;
-    if (front_control->offset > 0) {
+    front_control->state |= IS_OWNED_BIT;
+    if (!(front_control->state & FIRST_BLOCK_BIT)) {
         BackControl* back_control = reinterpret_cast<BackControl*>(
             reinterpret_cast<char*>(pointer) - sizeof(FrontControl) - sizeof(BackControl));
         FrontControl* previous_front_conrol = back_control->front_control;
-        if (previous_front_conrol->is_owned) {
+        if (previous_front_conrol->state & IS_OWNED_BIT) {
             Join(previous_front_conrol, front_control);
             front_control = previous_front_conrol;
         }
     }
-    if (front_control->offset + sizeof(FrontControl) + front_control->data_size + sizeof(BackControl) < front_control->total_size) {
+    if (!(front_control->state & LAST_BLOCK_BIT)) {
         FrontControl* following_front_control = reinterpret_cast<FrontControl*>(
             reinterpret_cast<char*>(pointer) + front_control->data_size + sizeof(BackControl));
         Join(front_control, following_front_control);
@@ -132,9 +130,7 @@ std::string FreeListMultiLevelAllocator::DebugString() const {
             FrontControl* cur = layers[i];
             while (cur != nullptr) {
                 ss << " -> " << reinterpret_cast<void*>(reinterpret_cast<char*>(cur) + sizeof(FrontControl)) <<
-                    "(data_size=" << cur->data_size << ", block=" <<
-                    reinterpret_cast<void*>(reinterpret_cast<char*>(cur) - cur->offset) <<
-                    ", offset=" << cur->offset << ", owned=" << cur->is_owned << ")";
+                    "(data_size=" << cur->data_size << ", state=" << cur->state << ")";
                 cur = cur->local_next;
             }
             ss << std::endl;

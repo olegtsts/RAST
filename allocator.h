@@ -4,14 +4,17 @@
 constexpr int MAX_MEM_LAYERS = 50;
 constexpr int MEM_ALLOCATED_AT_ONCE = 10000000;
 
+constexpr int FIRST_BLOCK_BIT = 1;
+constexpr int LAST_BLOCK_BIT = 2;
+constexpr int IS_OWNED_BIT = 4;
+
 struct FrontControl {
     size_t data_size;
     FrontControl* local_next;
     FrontControl* local_prev;
-    size_t offset;
-    size_t total_size;
     int source_layer;
-    bool is_owned;
+    // State which has bits FIRST_BLOCK_BIT, LAST_BLOCK_BIT, IS_OWNED_BIT
+    int state;
 };
 
 struct BackControl {
