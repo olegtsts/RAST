@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test
 
 allocator_test: allocator.o allocator_test.o
 	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror
@@ -39,5 +39,14 @@ packed_test.o: packed_test.cpp
 packed_test: packed_test.o
 	g++-7 -o packed_test packed_test.o -O3 -pedantic -Wall -Werror
 
+queue_test: queue.o queue_test.o
+	g++-7 -o queue_test queue_test.o queue.o -mcx16 -pthread -latomic -pedantic -Wall
+
+queue.o: queue.cpp queue.h
+	g++-7 queue.cpp -g -c -std=c++1z
+
+queue_test.o: queue_test.cpp
+	g++-7 queue_test.cpp -g -c -std=c++1z
+
 clean:
-	rm -f *.o *.gch allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test
+	rm -f *.o *.gch allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test
