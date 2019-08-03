@@ -149,7 +149,7 @@ public:
             if (old_next.ptr != nullptr) {
                 CountedNodePtr new_head = old_next;
                 new_head.external_count = 1;
-                current_head_data_callback(*old_head->data);
+                current_head_data_callback(*old_head.ptr->data);
                 if (head.compare_exchange_strong(old_head, new_head)) {
                     T* res = ptr->data.exchange(nullptr);
                     while (!ptr->next.compare_exchange_weak(old_next, CountedNodePtr{1, nullptr})) {}
@@ -162,7 +162,7 @@ public:
     }
 
     std::unique_ptr<T> Pop() noexcept {
-        return ExecuteAndPop([](){});
+        return PopWithHeadDataCallback([](const T&){});
     }
 
     ~LockFreeQueue() {
