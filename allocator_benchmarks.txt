@@ -1,0 +1,28 @@
+benchmark 1
+real
+0.16803
+user
+0.1498
+sys
+0.01783
+benchmark 2
+real
+0.17803
+user
+0.15928
+sys
+0.01869
+benchmark 3
+real
+0.16995
+user
+0.16515
+sys
+0.00449
+benchmark 4
+real
+0.14762
+user
+0.14384
+sys
+0.00352
