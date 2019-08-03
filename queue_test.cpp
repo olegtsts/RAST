@@ -9,7 +9,7 @@
 void thread_push(const int number, LockFreeQueue<int>& queue, std::shared_future<void> wait_to_go) noexcept {
     wait_to_go.wait();
     for (size_t i = 0; i < 100000; ++i) {
-        queue.Push(number);
+        queue.Push(std::make_unique<int>(number));
     }
 }
 void thread_pop(LockFreeQueue<int>& queue, std::shared_future<void> wait_to_go) noexcept {

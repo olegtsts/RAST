@@ -106,8 +106,7 @@ public:
         FreeExternalCounter(empty_node);
     }
 
-    void Push(T new_value) {
-        std::unique_ptr<T> new_data(new T(new_value));
+    void Push(std::unique_ptr<T>&& new_value) {
         CountedNodePtr new_next;
         new_next.ptr = new Node();
         new_next.external_count = 1;
@@ -116,14 +115,14 @@ public:
             CountedNodePtrCopyGuard tail_copy(tail);
             CountedNodePtr old_tail = tail_copy.GetCopy();
             T* old_data = nullptr;
-            if (old_tail.ptr->data.compare_exchange_strong(old_data, new_data.get())) {
+            if (old_tail.ptr->data.compare_exchange_strong(old_data, new_value.get())) {
                 CountedNodePtr old_next{0, nullptr};
                 if (!old_tail.ptr->next.compare_exchange_strong(old_next, new_next)) {
                     delete new_next.ptr;
                     new_next = old_next;
                 }
                 SetNewTail(old_tail, new_next);
-                new_data.release();
+                new_value.release();
                 break;
             } else {
                 CountedNodePtr old_next{0, nullptr};
@@ -136,7 +135,8 @@ public:
         }
     }
 
-    std::unique_ptr<T> Pop() {
+    template <typename Function>
+    std::unique_ptr<T> PopWithHeadDataCallback(Function current_head_data_callback) {
         while (true) {
             CountedNodePtrCopyGuard head_copy(head);
             CountedNodePtr old_head = head_copy.GetCopy();
@@ -149,6 +149,7 @@ public:
             if (old_next.ptr != nullptr) {
                 CountedNodePtr new_head = old_next;
                 new_head.external_count = 1;
+                current_head_data_callback(*old_head->data);
                 if (head.compare_exchange_strong(old_head, new_head)) {
                     T* res = ptr->data.exchange(nullptr);
                     while (!ptr->next.compare_exchange_weak(old_next, CountedNodePtr{1, nullptr})) {}
@@ -159,6 +160,11 @@ public:
             }
         }
     }
+
+    std::unique_ptr<T> Pop() noexcept {
+        return ExecuteAndPop([](){});
+    }
+
     ~LockFreeQueue() {
         while (true) {
             auto popped = Pop();
