@@ -1,0 +1,16 @@
+make: 'timers_benchmark_1' is up to date.
+benchmark 1
+real
+0.04836
+user
+0.04691
+sys
+0.00219
+make: 'timers_benchmark_2' is up to date.
+benchmark 2
+real
+0.00515
+user
+0.00471
+sys
+0.00046
