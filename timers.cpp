@@ -18,9 +18,9 @@ PeriodicTimer::PeriodicTimer() noexcept
 void PeriodicTimer::WindUp() noexcept {
     int64_t system_time = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     int64_t time_passed = system_time - last_system_time;
-    int64_t new_wind_up_counter = std::max(1l, std::min(
+    int64_t new_wind_up_counter = time_passed > 0 ? std::max(1l, std::min(
             min_system_click_call_period / time_passed * last_wind_up_counter,
-            max_wind_up_steps));
+            max_wind_up_steps)) : max_wind_up_steps;
 
     wind_up_balance += time_passed;
     approx_time_step = (time_passed * new_wind_up_counter / last_wind_up_counter + wind_up_balance) / (new_wind_up_counter + 1);
