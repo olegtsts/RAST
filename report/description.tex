@@ -727,11 +727,11 @@ The $WindUp$ procedure would do the following:
 	\item store current system time in $system\_time$ variable
 	\item calculate $time\_passed = system\_time - last\_system\_time$
 	\item calculate $new\_wind\_up\_counter = max(1, \\min(min\_system\_clock\_call\_period / time\_passed * last\_wind\_up\_counter,\\ max\_wind\_up\_steps))$. That is, if $time\_passed$ is less than \\$min\_system\_clock\_call\_period$, we want to increase amount of calls we want to perform until next win-up by the ratio of these values. But, we do not want it to be more than $max\_wind\_up\_steps$ and less than 1.
-	\item update $approx\_time\_step = time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter$
+	\item update $wind\_up\_balance += time\_passed$ in order to maintain $wind\_up\_balance$ invariant
+	\item update $approx\_time\_step = (time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter) \cdot \\ \cdot new\_wind\_up\_counter / (new\_wind\_up\_counter + 1)$
 	\item update $last\_wind\_up\_counter = new\_wind\_up\_counter$ to store new last counter
 	\item update $wind\_up\_counter = last\_wind\_up\_counter$ to do next wind up after this amount of steps
 	\item update $last\_system\_time = system\_time$ to save result for future wind-up
-	\item update $wind\_up\_balance += time\_passed$ in order to maintain $wind\_up\_balance$ invariant
 \end{itemize}
 Now let us consider the following algorithm for $GetPassedTime$ operation:
 \begin{itemize}
@@ -748,11 +748,11 @@ Why is this supposed to be correct? First of all, imagine a situation when we ca
 	\item store current system time in $system\_time$ variable
 	\item calculate $time\_passed = system\_time - last\_system\_time$
 	\item update $new\_wind\_up\_counter =\\= max(1, min(\\min\_system\_clock\_call\_period / time\_passed *\\* last\_wind\_up\_counter, max\_wind\_up\_steps)) =\\= max(1, min(0, max\_wind\_up\_steps)) = max(1, 0) = \\=1$.
-	\item update $approx\_time\_step = time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter = time\_passed / 1 + 0 / 1 =\\= time\_passed$
+	\item update $wind\_up\_balance += time\_passed$ so $wind\_up\_balance$ would equal $time\_passed$ now
+	\item update $approx\_time\_step = (time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter) \cdot \\ \cdot new\_wind\_up\_counter / (new\_wind\_up\_counter + 1) =\\= (time\_passed / 1 + time\_passed / 1) \cdot 1 / 2 =\\= time\_passed$
 	\item update $last\_wind\_up\_counter = new\_wind\_up\_counter = 1$
 	\item update $wind\_up\_counter = last\_wind\_up\_counter = 1$ so $WindUp$ would be called on next $GetPassedTime$ call
 	\item update $last\_system\_time = system\_time$ to save result for future wind-up
-	\item update $wind\_up\_balance += time\_passed$ so $wind\_up\_balance$ would equal $time\_passed$ now
 \end{itemize}
 This way, $last\_wind\_up\_counter$ continues to be equal 1 and next time the same calculations would also hold. Now let us consider what will happen in $GetPassedTime$ procedure:
 \begin{itemize}
@@ -765,7 +765,7 @@ This way, $last\_wind\_up\_counter$ continues to be equal 1 and next time the sa
 \end{itemize}
 Thus, all values we assumed at the start ($last\_wind\_up\_counter = 1$, $wind\_up\_balance = 0$) would still remain the same after $GetPassedTime$ call. That is why, the same will repeat on the next $GetPassedTime$ call and it will always return correctly calculated precise $time\_passed$ result on each call. That is, in case of large enough $time\_passed$, our timer is equivalent to simple timer logic.
 
-Another important point is that in any case we are trying to make $wind\_up\_balance$ being equal zero. Indeed, we set $approx\_time\_step = time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter$. Expression $time\_passed / last\_wind\_up\_counter$ evaluates to average time between $GetPassedTime$ previous calls. Expression \\$wind\_up\_balance / new\_wind\_up\_counter$ results in the fact, that during next $new\_wind\_up\_counter$ calls of $GetPassedTime$ we will, apart from main logic, decrease previous error $wind\_up\_balance$ to zero while updating $wind\_up\_balance -= result\_time$. Simultaneously, a new error, which the prognosis $time\_passed / last\_wind\_up\_counter$ poses, will also be accumulated while doing $wind\_up\_balance -= result\_time$, and it will be handled during the next $WindUp$ call, while we will count new $approx\_time\_step$.
+Another important point is that in any case we are trying to make $wind\_up\_balance$ being equal zero. Indeed, we set $approx\_time\_step = (time\_passed / last\_wind\_up\_counter +\\+ wind\_up\_balance / new\_wind\_up\_counter) \cdot new\_wind\_up\_counter /  (new\_wind\_up\_counter + 1)$. This formula is the solution to the equation $approx\_time\_step = time\_passed /  \\ / last\_wind\_up\_counter + (wind\_up\_balance - approx\_time\_step) / new\_wind\_up\_counter$. Expression $time\_passed / last\_wind\_up\_counter$ evaluates to average time between $GetPassedTime$ previous calls. Expression $(wind\_up\_balance - approx\_time\_step) / new\_wind\_up\_counter$ results in the fact, that during next $new\_wind\_up\_counter$ calls of $GetPassedTime$ we will decrease previous error $wind\_up\_balance$ to zero while updating $wind\_up\_balance -= result\_time$.
 
 $wind\_up\_balance$ parameter is rather important. It shows our overall accumulated calculation errors and if it is a large negative number, it implies that the sum of returned times from $GetPassedTime$ dramatically exceeded real time pace, and $approx\_time\_step$ would be negative in such a case, forcing $result\_time$ we give out to be equal $min\_measured\_time$. In case if $wind\_up\_balance$ is a rather big positive number, we will return larger values from $GetPassedTime$ because of larger $approx\_time\_step$, which would help us to catch up with the time pace.
 
@@ -783,6 +783,7 @@ Our timer object would store the following information:
 	\item $start\_timer$ which is a periodic timer associated with start event
 	\item $finish\_timer$ which is a periodic timer associated with finish event
 	\item $measurements\_counter$ which stores count of measurements
+	\item $last\_duration$ which stores last measured duration
 	\item $duration\_sum$ which stores sum of all durations measured so far
 \end{itemize}
 
@@ -790,12 +791,13 @@ Now let us consider, what methods do.
 
 Algorithm for $Start$ method:
 \begin{itemize}
-	\item decrease $duration\_sum$ by $start\_timer.GetPassedTime()$ (method $GetPassedTime$ is defined in the \fullref{subsec:low_overhead_periodic_timer} section)
+	\item decrease $last\_duration$ by $start\_timer.GetPassedTime()$ (method $GetPassedTime$ is defined in the \fullref{subsec:low_overhead_periodic_timer} section)
 \end{itemize}
 
 Algorithm for $Finish$ method
 \begin{itemize}
-	\item increase $duration\_sum$ by $finish\_timer.GetPassedTime()$
+	\item increase $last\_duration$ by $finish\_timer.GetPassedTime()$
+	\item increase $duration\_sum$ by $last\_duration$
 	\item increase $measurements\_counter$
 \end{itemize}
 
@@ -2073,6 +2075,7 @@ private:
 	PeriodicTimer start_timer;
 	PeriodicTimer finish_timer;
 	uint64_t measurements_counter;
+	int64_t last_duration;
 	int64_t duration_sum;
 };
 class WaitingTimer {
