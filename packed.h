@@ -1,20 +1,19 @@
 #pragma once
 
+#include <cstring>
 #include <cstdint>
 #include <iostream>
 
-template <int NumberOfInts, typename ... Args>
+template <int DataSize, typename ... Args>
 class Packed {
 public:
     Packed() {
-        for (size_t i = 0; i < (NumberOfInts + 7) / 8; ++i) {
-            data[i] = 0;
-        }
+        std::memset(data, 0, DataSize);
     }
 protected:
     void GetInternal() {}
     void SetInternal() {}
-    uint64_t data[(NumberOfInts + 7) / 8];
+    char data[(DataSize + 7) / 8 * 8];
 };
 
 template <typename T>
@@ -34,28 +33,26 @@ const int Param<NameClass, StoreBegin, StoreEnd>::store_begin;
 template <typename NameClass, int StoreBegin, int StoreEnd>
 const int Param<NameClass, StoreBegin, StoreEnd>::store_end;
 
-template <int NumberOfInts, typename StoreClass, typename ... Args>
-class Packed<NumberOfInts, StoreClass, Args...> : public Packed<NumberOfInts, Args...> {
+template <int DataSize, typename StoreClass, typename ... Args>
+class Packed<DataSize, StoreClass, Args...> : public Packed<DataSize, Args...> {
 protected:
-    using Packed<NumberOfInts, Args...>::data;
-    using Packed<NumberOfInts, Args...>::GetInternal;
-    using Packed<NumberOfInts, Args...>::SetInternal;
+    using Packed<DataSize, Args...>::data;
+    using Packed<DataSize, Args...>::GetInternal;
+    using Packed<DataSize, Args...>::SetInternal;
 
     typename StoreClass::NameClass::VarType GetInternal(const TypeSpecifier<typename StoreClass::NameClass>&) const {
-        uint64_t place_to_read = *reinterpret_cast<uint64_t const *>(reinterpret_cast<char const *>(&data[0]) + StoreClass::store_begin);
-        place_to_read &= ~(((1llu << ((8 - StoreClass::store_end + StoreClass::store_begin) * 8)) - 1) << (
-                (StoreClass::store_end - StoreClass::store_begin) * 8));
-        typename StoreClass::NameClass::VarType const * res = reinterpret_cast<typename StoreClass::NameClass::VarType const *>(&place_to_read);
-        return *res;
+        char temp_data[sizeof(typename StoreClass::NameClass::VarType)];
+        const int data_size = StoreClass::store_end - StoreClass::store_begin;
+        std::memcpy(temp_data, data + StoreClass::store_begin, data_size);
+        std::memset(temp_data + data_size, 0, sizeof(typename StoreClass::NameClass::VarType) - data_size);
+        return *reinterpret_cast<typename StoreClass::NameClass::VarType const *>(temp_data);
     }
     void SetInternal(const TypeSpecifier<typename StoreClass::NameClass>&, const typename StoreClass::NameClass::VarType& value) {
-        uint64_t& place_to_modify = *reinterpret_cast<uint64_t *>(reinterpret_cast<char *>(data) + StoreClass::store_begin);
-        place_to_modify &= ~((1llu << ((StoreClass::store_end - StoreClass::store_begin) * 8)) - 1);
-        place_to_modify |= *reinterpret_cast<uint64_t const *>(&value) & ((1llu << ((StoreClass::store_end - StoreClass::store_begin) * 8)) - 1);
+        std::memcpy(data + StoreClass::store_begin, reinterpret_cast<char const *>(&value), StoreClass::store_end - StoreClass::store_begin);
     }
 public:
     Packed()
-        : Packed<NumberOfInts, Args...>()
+        : Packed<DataSize, Args...>()
     {}
 
     template <typename SomeNameClass>
