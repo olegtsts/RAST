@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2
 
 allocator_test: allocator.o allocator_test.o
 	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror
@@ -48,5 +48,26 @@ queue.o: queue.cpp queue.h
 queue_test.o: queue_test.cpp
 	g++-7 queue_test.cpp -g -c -std=c++1z
 
+timers.o: timers.cpp timers.h
+	g++-7 timers.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+timers_test.o: timers_test.cpp
+	g++-7 timers_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+timers_test: timers_test.o timers.o
+	g++-7 -o timers_test timers.o timers_test.o -O3 -pedantic -Wall -Werror
+
+timers_benchmark_1.o: timers_benchmark_1.cpp
+	g++-7 timers_benchmark_1.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+timers_benchmark_1: timers_benchmark_1.o
+	g++-7 -o timers_benchmark_1 timers_benchmark_1.o -O3 -pedantic -Wall -Werror
+
+timers_benchmark_2.o: timers_benchmark_2.cpp
+	g++-7 timers_benchmark_2.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+timers_benchmark_2: timers_benchmark_2.o timers.o
+	g++-7 -o timers_benchmark_2 timers_benchmark_2.o timers.o -O3 -pedantic -Wall -Werror
+
 clean:
-	rm -f *.o *.gch allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test
+	rm -f *.o *.gch allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2
