@@ -1,7 +1,7 @@
 all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test
 
 allocator_test: allocator.o allocator_test.o
-	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror
+	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
 
 allocator_benchmark_1: allocator_benchmark_1.o
 	g++-7 -o allocator_benchmark_1 allocator_benchmark_1.o -O3 -pedantic -Wall -Werror
@@ -15,7 +15,7 @@ allocator_benchmark_3: allocator_benchmark_3.o
 allocator_benchmark_4: allocator_benchmark_4.o allocator.o
 	g++-7 -o allocator_benchmark_4 allocator_benchmark_4.o allocator.o -O3 -pedantic -Wall -Werror
 
-allocator_test.o: allocator_test.cpp
+allocator_test.o: allocator_test.cpp allocator.h
 	g++-7 allocator_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
 allocator_benchmark_1.o: allocator_benchmark_1.cpp

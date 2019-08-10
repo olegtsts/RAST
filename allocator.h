@@ -58,7 +58,7 @@ private:
     BackControl* GetBackControl(FrontControl* front_control);
     void Join(FrontControl* first_block, FrontControl* second_block);
     void SplitBlock(FrontControl* front_control, size_t first_size);
-    void* Allocate(const size_t size);
+    void* Allocate(size_t size, size_t alignment, size_t struct_size);
     void Deallocate(void* pointer);
 public:
     FreeListMultiLevelAllocator();
@@ -67,8 +67,8 @@ public:
     FreeListMultiLevelAllocator & operator =(const FreeListMultiLevelAllocator &) = delete;
 
     template <typename T>
-    T* Allocate(const size_t size) {
-        return reinterpret_cast<T*>(Allocate(size * sizeof(T)));
+    T* Allocate(size_t size) {
+        return reinterpret_cast<T*>(Allocate(size * sizeof(T), alignof(T), sizeof(T)));
     }
 
     template <typename T >
