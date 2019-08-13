@@ -90,6 +90,9 @@ public:
     }
     FixedFreeListMultiLevelAllocator(const FixedFreeListMultiLevelAllocator&) noexcept {
     }
+    template <typename U>
+    FixedFreeListMultiLevelAllocator(const FixedFreeListMultiLevelAllocator<U>&) noexcept {
+    }
     T* allocate (const size_t n, const void* hint = nullptr) {
         return global_allocator.Allocate<T>(n);
     }

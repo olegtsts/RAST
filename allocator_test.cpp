@@ -4,8 +4,9 @@
 #include <vector>
 #include <utility>
 #include <cstdlib>
+#include <deque>
 
-void TestWithVector() {
+void TestWithStdStructs() {
     std::vector<int, FixedFreeListMultiLevelAllocator<int>> v;
     std::cout << "first vector\n";
     for (int i = 0; i < 10; ++i) {
@@ -20,6 +21,11 @@ void TestWithVector() {
     std::map<float, double, std::less<float>, FixedFreeListMultiLevelAllocator<std::pair<float, double>>> m1;
     for (int i = 0; i < 10; ++i) {
             m1[i] = 1.;
+    }
+    std::cout << "deque\n";
+    std::deque<float, FixedFreeListMultiLevelAllocator<float>> deq;
+    for (int i = 0; i < 10; ++i) {
+        deq.push_back(i);
     }
 }
 
@@ -59,7 +65,7 @@ void CrossReferenceTest2() {
 
 
 int main() {
-    TestWithVector();
+    TestWithStdStructs();
     SimpleTest();
     srand(0);
     CrossReferenceTest1();
