@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <iostream>
 
+#include "type_specifier.h"
+
 template <int DataSize, typename ... Args>
 class Packed {
 public:
@@ -15,9 +17,6 @@ protected:
     void SetInternal() {}
     char data[(DataSize + 7) / 8 * 8];
 };
-
-template <typename T>
-class TypeSpecifier {};
 
 template <typename NameClassType, int StoreBegin, int StoreEnd>
 class Param {
