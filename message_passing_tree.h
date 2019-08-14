@@ -4,10 +4,9 @@
 #include <algorithm>
 #include <condition_variable>
 
+#include "type_specifier.h"
 #include "types.h"
-
-template <typename T>
-class TypeSpecifier {};
+#include "queue.h"
 
 template <typename From, typename To, typename Message>
 class Edge{};
@@ -67,7 +66,7 @@ protected:
     int max_message_processor_index;
     int max_edge_index;
     Vector<Vector<int>> dest_pipes;
-    Vector<Deque<std::unique_ptr<MessageBase>>> queues;
+    Vector<LockFreeQueue<MessageBase>> queues;
     Vector<std::unique_ptr<MessageProcessorBase>> message_processors;
     Vector<std::condition_variable_any *> notify_condition_variables;
 public:
@@ -108,7 +107,7 @@ protected:
         template <typename To2, typename Message2>
         void Send(std::unique_ptr<Message2>&& message) const {
             int edge_index = piper.GetEdgeIndexImpl(TypeSpecifier<Edge<From2, To2, Message2>>());
-            piper.queues[edge_index].push_back(std::move(message));
+            piper.queues[edge_index].Push(std::move(message));
             if (piper.notify_condition_variables[edge_index] != nullptr) {
                 piper.notify_condition_variables[edge_index]->notify_one();
             }
@@ -139,9 +138,10 @@ protected:
             auto& cur_piper = *dynamic_cast<Piper *>(&piper);
             To* message_processor = dynamic_cast<To*>(cur_piper.message_processors[cur_piper.cur_to_index].get());
             auto& current_queue = cur_piper.queues[cur_piper.cur_edge_index];
-            Message* value = dynamic_cast<Message*>(current_queue.front().get());
-            message_processor->Receive(ReceivingFrom<From>(), *value, SenderProxy<GlobalPiper, To>(piper));
-            current_queue.pop_front();
+            current_queue.PopWithHeadDataCallback([&message_processor, this] (const MessageBase& message_base) {
+                 const Message* message = dynamic_cast<const Message*>(&message_base);
+                 message_processor->Receive(ReceivingFrom<From>(), *message, SenderProxy<GlobalPiper, To>(piper));
+            });
         }
 
         virtual void SetConditionVariable(std::condition_variable_any * cv) const noexcept {
@@ -198,7 +198,7 @@ public:
         cur_edge_index = max_edge_index++;
         dest_pipes[cur_to_index].push_back(cur_edge_index);
         notify_condition_variables.push_back(nullptr);
-        queues = Vector<Deque<std::unique_ptr<MessageBase>>>(max_edge_index);
+        queues = Vector<LockFreeQueue<MessageBase>>(max_edge_index);
     }
 
     template <typename GlobalPiper>
