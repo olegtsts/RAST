@@ -81,7 +81,7 @@ message_passing_tree.lib: message_passing_tree.h types.lib type_specifier.lib qu
 message_passing_tree_test.o: message_passing_tree_test.cpp message_passing_tree.lib
 	g++-7 message_passing_tree_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
-message_passing_tree_test: message_passing_tree_test.o allocator.o
+message_passing_tree_test: message_passing_tree_test.o allocator.o queue.o
 	g++-7 -o message_passing_tree_test message_passing_tree_test.o allocator.o queue.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
 
 type_specifier.lib: type_specifier.h
