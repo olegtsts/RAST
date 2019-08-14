@@ -6,8 +6,9 @@
 #include <cstdlib>
 #include <new>
 #include <atomic>
+#include <deque>
 
-void TestWithVector() {
+void TestWithStdStructs() {
     std::vector<int, FixedFreeListMultiLevelAllocator<int>> v;
     std::cout << "first vector\n";
     for (int i = 0; i < 10; ++i) {
@@ -23,7 +24,11 @@ void TestWithVector() {
     for (int i = 0; i < 10; ++i) {
             m1[i] = 1.;
     }
-    std::cout << "OK\n";
+    std::cout << "deque\n";
+    std::deque<float, FixedFreeListMultiLevelAllocator<float>> deq;
+    for (int i = 0; i < 10; ++i) {
+        deq.push_back(i);
+    }
 }
 
 void SimpleTest() {
@@ -88,7 +93,7 @@ void TestWith16Alignment() {
 
 int main() {
     TestWith16Alignment();
-    TestWithVector();
+    TestWithStdStructs();
     SimpleTest();
     srand(0);
     CrossReferenceTest1();
