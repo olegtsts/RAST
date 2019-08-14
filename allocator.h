@@ -29,6 +29,9 @@ public:
     using VarType=unsigned int;
 };
 
+// FrontControl should have last byte zero for storing allocation offset.
+// With Packed struct, this requirement is automatically satisfied as long as
+// reserved size is not divisible by 8.
 using FrontControl=Packed<20,
       Param<FCDataSize, 0, 6>,
       Param<FCLocalNext, 6, 12>,
