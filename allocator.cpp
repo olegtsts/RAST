@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <string>
 #include <sstream>
+#include <memory>
 
 thread_local FreeListMultiLevelAllocator global_allocator;
 
@@ -78,8 +79,9 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
     }
 }
 
-void* FreeListMultiLevelAllocator::Allocate(const size_t size) {
-    size_t layer = GetLog2(size);
+void* FreeListMultiLevelAllocator::Allocate(size_t size, size_t alignment, size_t struct_size) {
+    size_t size_with_alignment = size + alignment - 8;
+    size_t layer = GetLog2(size_with_alignment);
     if (layers[layer] == nullptr) {
         char* arena = new char[MEM_ALLOCATED_AT_ONCE];
         FrontControl* front_control = reinterpret_cast<FrontControl*>(arena);
@@ -93,21 +95,26 @@ void* FreeListMultiLevelAllocator::Allocate(const size_t size) {
         Attach(front_control);
     }
     FrontControl* front_control = layers[layer];
-    SplitBlock(front_control, size);
+    SplitBlock(front_control, size_with_alignment);
     front_control->Set<FCState>(front_control->Get<FCState>() & ~IS_OWNED_BIT);
     Detach(front_control);
 
     void* allocated_pointer = reinterpret_cast<void*>(reinterpret_cast<char*>(front_control) + sizeof(FrontControl));
-    return allocated_pointer;
+    void* aligned_pointer = allocated_pointer;
+    std::align(alignment, struct_size, aligned_pointer, size_with_alignment);
+    size_t shift = reinterpret_cast<char*>(aligned_pointer) - reinterpret_cast<char*>(allocated_pointer);
+    *(reinterpret_cast<char*>(aligned_pointer) - 1) = static_cast<char>(shift);
+    return aligned_pointer;
 }
 
 void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
-    FrontControl* front_control = reinterpret_cast<FrontControl*>(reinterpret_cast<char*>(pointer) - sizeof(FrontControl));
+    size_t shift = static_cast<size_t>(*(reinterpret_cast<char*>(pointer) - 1));
+    FrontControl* front_control = reinterpret_cast<FrontControl*>(reinterpret_cast<char*>(pointer) - shift - sizeof(FrontControl));
     Attach(front_control);
     front_control->Set<FCState>(front_control->Get<FCState>() | IS_OWNED_BIT);
     if (!(front_control->Get<FCState>() & FIRST_BLOCK_BIT)) {
         BackControl* back_control = reinterpret_cast<BackControl*>(
-            reinterpret_cast<char*>(pointer) - sizeof(FrontControl) - sizeof(BackControl));
+            reinterpret_cast<char*>(pointer) - shift - sizeof(FrontControl) - sizeof(BackControl));
         FrontControl* previous_front_conrol = back_control->front_control;
         if (previous_front_conrol->Get<FCState>() & IS_OWNED_BIT) {
             Join(previous_front_conrol, front_control);
@@ -116,7 +123,7 @@ void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
     }
     if (!(front_control->Get<FCState>() & LAST_BLOCK_BIT)) {
         FrontControl* following_front_control = reinterpret_cast<FrontControl*>(
-            reinterpret_cast<char*>(pointer) + front_control->Get<FCDataSize>() + sizeof(BackControl));
+            reinterpret_cast<char*>(pointer) - shift + front_control->Get<FCDataSize>() + sizeof(BackControl));
         if (following_front_control->Get<FCState>() & IS_OWNED_BIT) {
             Join(front_control, following_front_control);
         }

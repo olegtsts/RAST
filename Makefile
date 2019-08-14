@@ -1,7 +1,7 @@
 all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 message_passing_tree_test
 
 allocator_test: allocator.o allocator_test.o
-	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror
+	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
 
 allocator_benchmark_1: allocator_benchmark_1.o
 	g++-7 -o allocator_benchmark_1 allocator_benchmark_1.o -O3 -pedantic -Wall -Werror
