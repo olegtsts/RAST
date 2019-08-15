@@ -81,7 +81,7 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
 
 void* FreeListMultiLevelAllocator::Allocate(size_t size, size_t alignment, size_t struct_size) {
     size_t size_with_alignment = size + std::max(alignment, static_cast<size_t>(8)) - 8;
-    size_t layer = GetLog2(size_with_alignment);
+    size_t layer = GetLog2(size_with_alignment) + 1;
     if (layers[layer] == nullptr) {
         char* arena = new char[MEM_ALLOCATED_AT_ONCE];
         FrontControl* front_control = reinterpret_cast<FrontControl*>(arena);

@@ -72,14 +72,14 @@ timers_benchmark_2.o: timers_benchmark_2.cpp
 timers_benchmark_2: timers_benchmark_2.o timers.o
 	g++-7 -o timers_benchmark_2 timers_benchmark_2.o timers.o -O3 -pedantic -Wall -Werror
 
-ranked_map.lib: ranked_map.h
+ranked_map.lib: ranked_map.h types.lib
 	touch ranked_map.lib
 
 ranked_map_test.o: ranked_map_test.cpp ranked_map.lib
 	g++-7 ranked_map_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
-ranked_map_test: ranked_map_test.o
-	g++-7 -o ranked_map_test ranked_map_test.o -O3 -pedantic -Wall -Werror
+ranked_map_test: ranked_map_test.o allocator.o
+	g++-7 -o ranked_map_test ranked_map_test.o allocator.o -O3 -pedantic -Wall -Werror
 
 types.lib: types.h allocator.o type_specifier.lib
 	touch types.lib

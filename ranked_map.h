@@ -1,6 +1,8 @@
 #include <unordered_map>
 #include <set>
 
+#include "types.h"
+
 template <typename TKey, typename TValue, typename THash = std::hash<TKey>>
 class RankedMap {
 public:
@@ -81,6 +83,6 @@ public:
     }
 
 private:
-    typename std::unordered_map<TKey, TValue, THash> key_value;
-    typename std::set<std::pair<TValue, TKey>> value_key;
+    UnoderedMap<TKey, TValue, THash> key_value;
+    Set<std::pair<TValue, TKey>> value_key;
 };
