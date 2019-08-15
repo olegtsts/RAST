@@ -12,7 +12,7 @@ FreeListMultiLevelAllocator::FreeListMultiLevelAllocator() {
     }
 }
 
-size_t FreeListMultiLevelAllocator::GetLog2(size_t number) {
+size_t FreeListMultiLevelAllocator::GetLowerLog2(size_t number) {
     size_t log_value = 0;
     while (number > 1) {
         ++log_value;
@@ -21,8 +21,21 @@ size_t FreeListMultiLevelAllocator::GetLog2(size_t number) {
     return log_value;
 }
 
+size_t FreeListMultiLevelAllocator::GetUpperLog2(size_t number) {
+    size_t log_value = 0;
+    bool is_round = true;
+    while (number > 1) {
+        ++log_value;
+        if ((number & 1) > 0) {
+            is_round = false;
+        }
+        number >>= 1;
+    }
+    return log_value + (is_round ? 0 : 1);
+}
+
 void FreeListMultiLevelAllocator::Attach(FrontControl* front_control) {
-    size_t layer = std::min(static_cast<size_t>(front_control->Get<FCSourceLayer>()), GetLog2(front_control->Get<FCDataSize>()));
+    size_t layer = std::min(static_cast<size_t>(front_control->Get<FCSourceLayer>()), GetLowerLog2(front_control->Get<FCDataSize>()));
     front_control->Set<FCLocalPrev>(nullptr);
     front_control->Set<FCLocalNext>(nullptr);
     if (layers[layer] != nullptr) {
@@ -32,7 +45,7 @@ void FreeListMultiLevelAllocator::Attach(FrontControl* front_control) {
 }
 
 void FreeListMultiLevelAllocator::Detach(FrontControl* front_control) {
-    size_t layer = std::min(static_cast<size_t>(front_control->Get<FCSourceLayer>()), GetLog2(front_control->Get<FCDataSize>()));
+    size_t layer = std::min(static_cast<size_t>(front_control->Get<FCSourceLayer>()), GetLowerLog2(front_control->Get<FCDataSize>()));
     if (front_control->Get<FCLocalPrev>() != nullptr) {
         front_control->Get<FCLocalPrev>()->Set<FCLocalNext>(front_control->Get<FCLocalNext>());
     }
@@ -81,7 +94,7 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
 
 void* FreeListMultiLevelAllocator::Allocate(size_t size, size_t alignment, size_t struct_size) {
     size_t size_with_alignment = size + std::max(alignment, static_cast<size_t>(8)) - 8;
-    size_t layer = GetLog2(size_with_alignment) + 1;
+    size_t layer = GetUpperLog2(size_with_alignment);
     if (layers[layer] == nullptr) {
         char* arena = new char[MEM_ALLOCATED_AT_ONCE];
         FrontControl* front_control = reinterpret_cast<FrontControl*>(arena);
