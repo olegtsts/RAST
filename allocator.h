@@ -71,6 +71,7 @@ public:
 
     template <typename T>
     T* Allocate(size_t size) {
+        static_assert(alignof(T) % 8 == 0 || 8 % alignof(T) == 0);
         return reinterpret_cast<T*>(Allocate(size * sizeof(T), alignof(T), sizeof(T)));
     }
 

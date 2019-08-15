@@ -81,17 +81,20 @@ ranked_map_test.o: ranked_map_test.cpp ranked_map.lib
 ranked_map_test: ranked_map_test.o
 	g++-7 -o ranked_map_test ranked_map_test.o -O3 -pedantic -Wall -Werror
 
-types.lib: types.h allocator.o
+types.lib: types.h allocator.o type_specifier.lib
 	touch types.lib
 
-message_passing_tree.lib: message_passing_tree.h types.lib
+message_passing_tree.lib: message_passing_tree.h types.lib type_specifier.lib queue.o
 	touch message_passing_tree.lib
 
 message_passing_tree_test.o: message_passing_tree_test.cpp message_passing_tree.lib
 	g++-7 message_passing_tree_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
-message_passing_tree_test: message_passing_tree_test.o allocator.o
-	g++-7 -o message_passing_tree_test message_passing_tree_test.o allocator.o -O3 -pedantic -Wall -Werror
+message_passing_tree_test: message_passing_tree_test.o allocator.o queue.o
+	g++-7 -o message_passing_tree_test message_passing_tree_test.o allocator.o queue.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
+
+type_specifier.lib: type_specifier.h
+	touch type_specifier.lib
 
 clean:
 	rm -f *.o *.gch *.lib allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test
