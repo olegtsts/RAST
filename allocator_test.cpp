@@ -4,8 +4,11 @@
 #include <vector>
 #include <utility>
 #include <cstdlib>
+#include <new>
+#include <atomic>
+#include <deque>
 
-void TestWithVector() {
+void TestWithStdStructs() {
     std::vector<int, FixedFreeListMultiLevelAllocator<int>> v;
     std::cout << "first vector\n";
     for (int i = 0; i < 10; ++i) {
@@ -21,6 +24,11 @@ void TestWithVector() {
     for (int i = 0; i < 10; ++i) {
             m1[i] = 1.;
     }
+    std::cout << "deque\n";
+    std::deque<float, FixedFreeListMultiLevelAllocator<float>> deq;
+    for (int i = 0; i < 10; ++i) {
+        deq.push_back(i);
+    }
 }
 
 void SimpleTest() {
@@ -31,6 +39,7 @@ void SimpleTest() {
     for (int* pointer: pointers) {
         FixedFreeListMultiLevelAllocator<int>().deallocate(pointer, 0);
     }
+    std::cout << "OK\n";
 }
 
 void CrossReferenceTest1() {
@@ -44,6 +53,7 @@ void CrossReferenceTest1() {
         *pointers[rand() % 1000] += 1;
     }
     pointers2[0]++;
+    std::cout << "OK\n";
 }
 
 void CrossReferenceTest2() {
@@ -55,15 +65,38 @@ void CrossReferenceTest2() {
     for (int i = 0; i < 10000000; ++i) {
         *pointers[rand() % 1000] += 1;
     }
+    std::cout << "OK\n";
 }
 
+struct StructWith16Aligment {
+    int a;
+    struct Struct16Bytes {
+        int64_t a;
+        int64_t b;
+    };
+    std::atomic<Struct16Bytes> b;
+};
+
+void TestWith16Alignment() {
+    std::vector<StructWith16Aligment* > pointers;
+    for (int i = 0; i < 10; ++i) {
+        StructWith16Aligment * pointer = FixedFreeListMultiLevelAllocator<StructWith16Aligment>().allocate(1);
+        new(pointer) StructWith16Aligment();
+        pointer->b.store({});
+        pointers.push_back(pointer);
+    }
+    for (StructWith16Aligment * pointer : pointers) {
+        FixedFreeListMultiLevelAllocator<StructWith16Aligment>().deallocate(pointer, 1);
+    }
+    std::cout << "OK\n";
+}
 
 int main() {
-    TestWithVector();
+    TestWith16Alignment();
+    TestWithStdStructs();
     SimpleTest();
     srand(0);
     CrossReferenceTest1();
     CrossReferenceTest2();
-    std::cout << "OK\n";
     return 0;
 }

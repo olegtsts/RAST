@@ -29,6 +29,9 @@ public:
     using VarType=unsigned int;
 };
 
+// FrontControl should have last byte zero for storing allocation offset.
+// With Packed struct, this requirement is automatically satisfied as long as
+// reserved size is not divisible by 8.
 using FrontControl=Packed<20,
       Param<FCDataSize, 0, 6>,
       Param<FCLocalNext, 6, 12>,
@@ -58,7 +61,7 @@ private:
     BackControl* GetBackControl(FrontControl* front_control);
     void Join(FrontControl* first_block, FrontControl* second_block);
     void SplitBlock(FrontControl* front_control, size_t first_size);
-    void* Allocate(const size_t size);
+    void* Allocate(size_t size, size_t alignment, size_t struct_size);
     void Deallocate(void* pointer);
 public:
     FreeListMultiLevelAllocator();
@@ -67,8 +70,8 @@ public:
     FreeListMultiLevelAllocator & operator =(const FreeListMultiLevelAllocator &) = delete;
 
     template <typename T>
-    T* Allocate(const size_t size) {
-        return reinterpret_cast<T*>(Allocate(size * sizeof(T)));
+    T* Allocate(size_t size) {
+        return reinterpret_cast<T*>(Allocate(size * sizeof(T), alignof(T), sizeof(T)));
     }
 
     template <typename T >
@@ -89,6 +92,9 @@ public:
     FixedFreeListMultiLevelAllocator() noexcept {
     }
     FixedFreeListMultiLevelAllocator(const FixedFreeListMultiLevelAllocator&) noexcept {
+    }
+    template <typename U>
+    FixedFreeListMultiLevelAllocator(const FixedFreeListMultiLevelAllocator<U>&) noexcept {
     }
     T* allocate (const size_t n, const void* hint = nullptr) {
         return global_allocator.Allocate<T>(n);
