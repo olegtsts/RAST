@@ -55,7 +55,8 @@ struct BackControl {
 
 class FreeListMultiLevelAllocator {
 private:
-    size_t GetLog2(size_t number);
+    size_t GetLowerLog2(size_t number);
+    size_t GetUpperLog2(size_t number);
     void Attach(FrontControl* front_control);
     void Detach(FrontControl* front_control);
     BackControl* GetBackControl(FrontControl* front_control);
