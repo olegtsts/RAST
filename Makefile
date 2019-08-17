@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test
 
 allocator_test: allocator.o allocator_test.o
 	g++-7 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
@@ -72,6 +72,15 @@ timers_benchmark_2.o: timers_benchmark_2.cpp
 timers_benchmark_2: timers_benchmark_2.o timers.o
 	g++-7 -o timers_benchmark_2 timers_benchmark_2.o timers.o -O3 -pedantic -Wall -Werror
 
+exception_with_backtrace.o: exception_with_backtrace.cpp exception_with_backtrace.h
+	g++-7 exception_with_backtrace.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+exception_with_backtrace_test.o: exception_with_backtrace_test.cpp
+	g++-7 exception_with_backtrace_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+exception_with_backtrace_test: exception_with_backtrace_test.o exception_with_backtrace.o
+	g++-7 -o exception_with_backtrace_test exception_with_backtrace_test.o exception_with_backtrace.o -O3 -pedantic -Wall -Werror -lunwind -lbacktrace -ldl
+
 ranked_map.lib: ranked_map.h types.lib
 	touch ranked_map.lib
 
@@ -97,4 +106,4 @@ type_specifier.lib: type_specifier.h
 	touch type_specifier.lib
 
 clean:
-	rm -f *.o *.gch *.lib allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test
+	rm -f *.o *.gch *.lib allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test
