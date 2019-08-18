@@ -41,7 +41,7 @@ _Unwind_Reason_Code ExceptionWithBacktrace::TraceFunc(_Unwind_Context* context, 
         } else {
             ::Dl_info dl_info;
             ::dladdr((void *)ip, &dl_info);
-            state->ss << state->output_count++ << ": " << (void *)ip << " in " << dl_info.dli_fname << std::endl;
+            state->ss << state->output_count++ << ": " << dl_info.dli_fname << std::endl;
         }
     }
     return(_URC_NO_REASON);

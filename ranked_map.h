@@ -82,6 +82,10 @@ public:
         }
     }
 
+    size_t GetSize() const {
+        return key_value.size();
+    }
+
 private:
     UnoderedMap<TKey, TValue, THash> key_value;
     Set<std::pair<TValue, TKey>> value_key;
