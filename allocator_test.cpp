@@ -20,7 +20,7 @@ void TestWithStdStructs() {
         v2.push_back(1);
     }
     std::cout << "map\n";
-    std::map<float, double, std::less<float>, FixedFreeListMultiLevelAllocator<std::pair<float, double>>> m1;
+    std::map<float, double, std::less<float>, FixedFreeListMultiLevelAllocator<std::pair<const float, double>>> m1;
     for (int i = 0; i < 10; ++i) {
             m1[i] = 1.;
     }
@@ -91,11 +91,28 @@ void TestWith16Alignment() {
     std::cout << "OK\n";
 }
 
+void RandomAllocationTest() {
+    std::vector<char *> pointers;
+    for (int i = 0; i < 100; ++i) {
+        for (int j = 0; j < rand() % 100; ++j) {
+            size_t size = rand() % 500 + 1;
+            char* pointer = FixedFreeListMultiLevelAllocator<char>().allocate(size);
+//            memset(pointer, '\0', size);
+            pointers.push_back(pointer);
+        }
+        for (auto pointer : pointers) {
+            FixedFreeListMultiLevelAllocator<char>().deallocate(pointer, 1);
+        }
+    }
+
+}
+
 int main() {
     TestWith16Alignment();
     TestWithStdStructs();
     SimpleTest();
     srand(0);
+    RandomAllocationTest();
     CrossReferenceTest1();
     CrossReferenceTest2();
     return 0;
