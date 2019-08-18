@@ -80,6 +80,6 @@ void ExceptionTopKeeper::SetPath(const std::string& new_path) noexcept {
     Restore();
 }
 
-const size_t ExceptionTopKeeper::top_size(1);
+const size_t ExceptionTopKeeper::top_size(1000);
 const int64_t ExceptionTopKeeper::keep_time(600 * 1000 * 1000); // 10 mins
 const bool ExceptionTopKeeper::debug_mode(false);
