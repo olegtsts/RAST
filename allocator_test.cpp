@@ -92,8 +92,8 @@ void TestWith16Alignment() {
 }
 
 void RandomAllocationTest() {
-    std::vector<char *> pointers;
     for (int i = 0; i < 100; ++i) {
+        std::vector<char *> pointers;
         for (int j = 0; j < rand() % 100; ++j) {
             size_t size = rand() % 500 + 1;
             char* pointer = FixedFreeListMultiLevelAllocator<char>().allocate(size);
