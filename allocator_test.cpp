@@ -7,6 +7,7 @@
 #include <new>
 #include <atomic>
 #include <deque>
+#include <cstring>
 
 void TestWithStdStructs() {
     std::vector<int, FixedFreeListMultiLevelAllocator<int>> v;
@@ -93,18 +94,27 @@ void TestWith16Alignment() {
 
 void RandomAllocationTest() {
     for (int i = 0; i < 100; ++i) {
-        std::vector<char *> pointers;
+        std::vector<char *> char_pointers;
+        std::vector<uint64_t *> uint_pointers;
         for (int j = 0; j < rand() % 100; ++j) {
             size_t size = rand() % 500 + 1;
             char* pointer = FixedFreeListMultiLevelAllocator<char>().allocate(size);
-//            memset(pointer, '\0', size);
-            pointers.push_back(pointer);
+            memset(pointer, '\0', size);
+            char_pointers.push_back(pointer);
         }
-        for (auto pointer : pointers) {
+        for (int j = 0; j < rand() % 100; ++j) {
+            size_t size = rand() % 500 + 1;
+            uint64_t* pointer = FixedFreeListMultiLevelAllocator<uint64_t>().allocate(size);
+            memset(pointer, '\0', size * sizeof(uint64_t));
+            uint_pointers.push_back(pointer);
+        }
+        for (auto pointer : char_pointers) {
             FixedFreeListMultiLevelAllocator<char>().deallocate(pointer, 1);
         }
+        for (auto pointer : uint_pointers) {
+            FixedFreeListMultiLevelAllocator<uint64_t>().deallocate(pointer, 1);
+        }
     }
-
 }
 
 int main() {
