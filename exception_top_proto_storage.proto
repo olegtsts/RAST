@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message ExceptionTop {
+    map<string, uint64> exception_count = 1;
+    map<string, int64> exception_last_time = 2;
+};
