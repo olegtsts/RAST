@@ -94,8 +94,10 @@ void FreeListMultiLevelAllocator::SplitBlock(FrontControl* front_control, size_t
 
 void* FreeListMultiLevelAllocator::Allocate(size_t size, size_t alignment, size_t struct_size) {
     size_t size_with_alignment = size + std::max(alignment, static_cast<size_t>(8)) - 8;
+    size_with_alignment = (size_with_alignment + 7) / 8 * 8;
     size_t layer = GetUpperLog2(size_with_alignment);
     if (layers[layer] == nullptr) {
+        static_assert(MEM_ALLOCATED_AT_ONCE % 8 == 0);
         char* arena = new char[MEM_ALLOCATED_AT_ONCE];
         FrontControl* front_control = reinterpret_cast<FrontControl*>(arena);
         BackControl* back_control = reinterpret_cast<BackControl*>(arena + MEM_ALLOCATED_AT_ONCE - sizeof(BackControl));
@@ -127,7 +129,7 @@ void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
     front_control->Set<FCState>(front_control->Get<FCState>() | IS_OWNED_BIT);
     if (!(front_control->Get<FCState>() & FIRST_BLOCK_BIT)) {
         BackControl* back_control = reinterpret_cast<BackControl*>(
-            reinterpret_cast<char*>(pointer) - shift - sizeof(FrontControl) - sizeof(BackControl));
+            reinterpret_cast<char*>(front_control) - sizeof(BackControl));
         FrontControl* previous_front_conrol = back_control->front_control;
         if (previous_front_conrol->Get<FCState>() & IS_OWNED_BIT) {
             Join(previous_front_conrol, front_control);
@@ -136,7 +138,7 @@ void FreeListMultiLevelAllocator::Deallocate(void* pointer) {
     }
     if (!(front_control->Get<FCState>() & LAST_BLOCK_BIT)) {
         FrontControl* following_front_control = reinterpret_cast<FrontControl*>(
-            reinterpret_cast<char*>(pointer) - shift + front_control->Get<FCDataSize>() + sizeof(BackControl));
+            reinterpret_cast<char*>(front_control) + sizeof(FrontControl) + front_control->Get<FCDataSize>() + sizeof(BackControl));
         if (following_front_control->Get<FCState>() & IS_OWNED_BIT) {
             Join(front_control, following_front_control);
         }

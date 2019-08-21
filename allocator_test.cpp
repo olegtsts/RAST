@@ -7,6 +7,7 @@
 #include <new>
 #include <atomic>
 #include <deque>
+#include <cstring>
 
 void TestWithStdStructs() {
     std::vector<int, FixedFreeListMultiLevelAllocator<int>> v;
@@ -20,7 +21,7 @@ void TestWithStdStructs() {
         v2.push_back(1);
     }
     std::cout << "map\n";
-    std::map<float, double, std::less<float>, FixedFreeListMultiLevelAllocator<std::pair<float, double>>> m1;
+    std::map<float, double, std::less<float>, FixedFreeListMultiLevelAllocator<std::pair<const float, double>>> m1;
     for (int i = 0; i < 10; ++i) {
             m1[i] = 1.;
     }
@@ -91,11 +92,37 @@ void TestWith16Alignment() {
     std::cout << "OK\n";
 }
 
+void RandomAllocationTest() {
+    for (int i = 0; i < 100; ++i) {
+        std::vector<char *> char_pointers;
+        std::vector<uint64_t *> uint_pointers;
+        for (int j = 0; j < rand() % 100; ++j) {
+            size_t size = rand() % 500 + 1;
+            char* pointer = FixedFreeListMultiLevelAllocator<char>().allocate(size);
+            memset(pointer, '\0', size);
+            char_pointers.push_back(pointer);
+        }
+        for (int j = 0; j < rand() % 100; ++j) {
+            size_t size = rand() % 500 + 1;
+            uint64_t* pointer = FixedFreeListMultiLevelAllocator<uint64_t>().allocate(size);
+            memset(pointer, '\0', size * sizeof(uint64_t));
+            uint_pointers.push_back(pointer);
+        }
+        for (auto pointer : char_pointers) {
+            FixedFreeListMultiLevelAllocator<char>().deallocate(pointer, 1);
+        }
+        for (auto pointer : uint_pointers) {
+            FixedFreeListMultiLevelAllocator<uint64_t>().deallocate(pointer, 1);
+        }
+    }
+}
+
 int main() {
     TestWith16Alignment();
     TestWithStdStructs();
     SimpleTest();
     srand(0);
+    RandomAllocationTest();
     CrossReferenceTest1();
     CrossReferenceTest2();
     return 0;
