@@ -423,7 +423,7 @@ Blocks contained in the same external memory segment (which allocator asked from
 Finally, the allocation procedure is the following:
 
 \begin{itemize}
-\item calculate integral part $N = int(log(size))$ of the size of the memory consumer asks to allocate
+\item calculate $N = ceil(log(size))$ of the size of the memory consumer asks to allocate. We need to calculate upper bound so that to make sure that the block we fetch from that layer contains at least $N$ bytes.
 \item if the corresponding $N$-th list of blocks is empty, we allocate several external blocks of the sizes $2^{N}$ and build Block structure upon each of them, putting blocks to the $N$-th list
 \item detach first block from the list
 \item split the block into two blocks: first block has exactly needed size, second block consists of what is remained
