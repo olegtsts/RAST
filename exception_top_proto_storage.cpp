@@ -26,6 +26,7 @@ void ExceptionTopKeeper::Dump() {
         assert(exception_top.SerializeToOstream(&out));
     }
     std::filesystem::rename(tmp_path / "data", path);
+    dump_timer.Reset();
 }
 
 void ExceptionTopKeeper::Restore() {
