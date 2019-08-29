@@ -4,6 +4,7 @@
 
 #include "types.h"
 #include "timers.h"
+#include "message_passing_tree.h"
 
 //TODO: check sizeof
 struct ShadowCounter {
@@ -11,13 +12,11 @@ struct ShadowCounter {
     unsigned noupdate_counter:7;
 };
 
+typedef ReshardingConf = Vector<Vector<int>>;
+
 // TODO: fix the book with class variables
 template <typename Controller>
 class Sharder<Controller> {
-public:
-
-    typedef ReshardingConf = Vector<Vector<int>>;
-
 private:
     Sharder(Controller& controller)
         : controller(controller),
@@ -32,7 +31,7 @@ private:
     }
 
 public:
-    Sharder& GetInstance() {
+    static harder& GetInstance() {
         static Sharder sharder;
         return &sharder;
     }
@@ -141,3 +140,37 @@ private:
     static thread_local WaitingTimer reshard_waiting_timer;
 };
 
+//TODO update signatures in the book
+template <typename ... Args>
+class MessagePassingController {
+public:
+    MessagePassingController();
+    void ProcessShard(int shard_num, bool can_be_updated);
+    void PreProcess(int thread_num, bool can_be_updated);
+    void OnSwitch(int thread_num, const Vector<int>& new_shards) noexcept;
+    ReshardingConf GetInitialSharding(int threads_count);
+    ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count);
+    const int GetMaxThreadCount();
+private:
+    MessagePassingTree<Args...> message_passing_tree;
+    Vector<std::condition_variable_any> message_wait_cvs;
+    Vector<std::condition_variable_any *> message_send_cvs;
+    static thread_local bool are_queues_empty;
+    static const uint64_t wait_for_message_time;
+    Vector<StartFinishTimer> message_processor_timers;
+    Vector<StartFinishTimer> edge_timers;
+};
+
+// TODO: fix constructor name
+// TODO  sharder is singleton, not a variable
+template <typename ... Args>
+class DynamicallyShardedMessagePassingPool {
+public:
+    DynamicallyShardedMessagePassingPool();
+public:
+    static DynamicallyShardedMessagePassingPool& GetInstance();
+    static void Run() noexcept {
+    }
+private:
+    MessagePassingController<Args...> controller;
+};
