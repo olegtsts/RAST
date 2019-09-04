@@ -35,7 +35,7 @@ protected:
         {}
 
         virtual void SetConditionVariable (std::condition_variable_any *) const noexcept = 0;
-        virtual void NotifyAboutMessage() const = 0;
+        virtual bool NotifyAboutMessage() const = 0;
         virtual int GetFromIndex() const noexcept = 0;
         virtual int GetToIndex() const noexcept = 0;
         virtual ~EdgeProxy() noexcept {}
@@ -134,14 +134,17 @@ protected:
         using Piper<>::EdgeProxy<GlobalPiper>::EdgeProxy;
         using Piper<>::EdgeProxy<GlobalPiper>::piper;
 
-        virtual void NotifyAboutMessage() const {
+        virtual bool NotifyAboutMessage() const {
             auto& cur_piper = *dynamic_cast<Piper *>(&piper);
             To* message_processor = dynamic_cast<To*>(cur_piper.message_processors[cur_piper.cur_to_index].get());
             auto& current_queue = cur_piper.queues[cur_piper.cur_edge_index];
-            current_queue.PopWithHeadDataCallback([&message_processor, this] (const MessageBase& message_base) {
+            bool was_callback_called = false;
+            current_queue.PopWithHeadDataCallback([&message_processor, &was_callback_called, this] (const MessageBase& message_base) {
                  const Message* message = dynamic_cast<const Message*>(&message_base);
                  message_processor->Receive(ReceivingFrom<From>(), *message, SenderProxy<GlobalPiper, To>(piper));
+                 was_callback_called = true;
             });
+            return was_callback_called;
         }
 
         virtual void SetConditionVariable(std::condition_variable_any * cv) const noexcept {
@@ -244,6 +247,10 @@ public:
 
     const Piper<>::MessageProcessorProxy<GlobalPiper>* GetMessageProcessorProxy(const int index) noexcept {
         return message_processor_handlers[index].get();
+    }
+
+    size_t GetMessageProcessorsCount() const noexcept {
+        return message_processor_handlers.size();
     }
 
     size_t GetEdgesCount() const noexcept {
