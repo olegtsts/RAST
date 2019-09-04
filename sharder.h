@@ -183,7 +183,7 @@ public:
         }
     }
 
-    void SetSendedCVS(const ReshardingConf& conf) {
+    void SetSenderCVS(const ReshardingConf& conf) {
         std::vector<int> shard_thread;
         for (int thread_num= 0; thread_num < static_cast<int>(conf.size()); ++thread_num) {
             for (auto shard_num : conf[thread_num]) {
@@ -210,11 +210,24 @@ public:
         for (auto shard_num : message_passing_tree.GetMessageProcessorsCount()) {
             conf[shard_num % threads_count].push_back(shard_num);
         }
+        SetSenderCVS(conf);
         return conf;
     }
 
-    void OnSwitch(int thread_num, const Vector<int>& new_shards) noexcept;
+    void OnSwitch(int thread_num, const Vector<int>& new_shards) noexcept {
+        for (int new_shard : new_shards) {
+            for (int outgoing_edge : message_passing_tree.GetOutgoingEdges(new_shard)) {
+                message_passing_tree.GetEdgeProxy(outgoing_edge)->SetConditionVariable(&message_send_cvs[outgoing_edge]);
+            }
+            message_processor_timers[new_shard].Reset();
+            for (int edge : message_passing_tree.GetIncomingEdges(shard_num)) {
+                edge_timers[edge].Reset();
+            }
+        }
+    }
+
     ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count);
+
     size_t GetMaxThreadsCount() const noexcept {
         return message_passing_tree.GetMessageProcessorsCount();
     }
