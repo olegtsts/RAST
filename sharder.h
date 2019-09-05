@@ -226,7 +226,71 @@ public:
         }
     }
 
-    ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count);
+    void ProcessMPChoice(int64_t duration, int mp, int64_t* accumulated_duration,
+            Vector<int>* current_thread_mps, Set<std::pair<int64_t, int>>* available_duration_mp,
+            Vector<int64_t>* message_passing_cost) {
+        *accumulated_duration += duration;
+        current_thread_mps->push_back(mp);
+        available_duration_mp->erase(std::make_pair(duraction, mp));
+        for (auto duration_mp : available_duration_mp) {
+            for (int edge : message_passing_tree.GetConnectingEdges(mp, duration_mp.second)) {
+                message_passing_cost->operator[](duration_mp.second) += edge_timers[edge].GetDurationSum();
+            }
+        }
+    }
+
+    ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count) {
+        int64_t avg_duration = 0;
+        for (int i = 0; i < message_passing_tree.GetMessageProcessorsCount(); ++i) {
+            avg_duration += message_processor_timers[i].GetDurationSum();
+        }
+        for (int i = 0; i < message_passing_tree.GetEdgesCount(); ++i) {
+            avg_duration += edge_timers[i].GetDurationSum();
+        }
+        avg_duration /= threads_count;
+        avg_duration = std::max(avg_duration, 1);
+        Set<std::pair<int64_t, int>> available_duration_mp;
+        for (int i = 0; i < message_passing_tree.GetMessageProcessorsCount(); ++i) {
+            int64_t duration = message_processor_timers[i].GetDurationSum();
+            for (int j : message_passing_tree.GetIncomingEdges(i)) {
+                duration += edge_timers[j].GetDurationSum();
+            }
+            available_duration_mp.insert(std::make_pair(duration, i));
+        }
+        ReshardingConf conf;
+        for (int thread_num = 0; thread_num < threads_count; ++thread_num) {
+            int64_t accumulated_duration = 0;
+            Vector<int> current_thread_mps;
+            Vector<int64_t> message_passing_cost(message_passing_tree.GetMessageProcessorsCount(), 0);
+            assert(available_duration_mp.size() > 0);
+            auto it = available_duration_mp.rbegin()
+            if (it->first > avg_duration) {
+                ProcessMPChoice(it->first, it->second, &accumulated_duration,
+                        &current_thread_mps, &available_duration_mp, &message_passing_cost);
+            } else {
+                while (available_duration_mp.size() > 0) {
+                    auto chosen_it = available_duration_mp.end();
+                    double largest_cost = -1;
+                    for (auto it = available_duration_mp.begin(); it != available_duration_mp.upper_bound(std::make_pair(avg_duration, 0)); ++it) {
+                        if (largest_cost < message_passing_cost[it->second]) {
+                            largest_cost = message_passing_cost[it->second];
+                            chosen_it = it;
+                        }
+                    }
+                    if (chosen_it == available_duration_mp.end()) {
+                        break;
+                    } else {
+                        ProcessMPChoice(chosen_it->first, chosen_it->second, &accumulated_duration,
+                            &current_thread_mps, &available_duration_mp, &message_passing_cost);
+                    }
+                }
+            }
+            assert(current_thread_mps.size() > 0);
+            conf.push_back(current_thread_mps);
+        }
+        SetSenderCVS(conf);
+        return conf;
+    }
 
     size_t GetMaxThreadsCount() const noexcept {
         return message_passing_tree.GetMessageProcessorsCount();
