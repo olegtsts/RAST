@@ -82,6 +82,9 @@ public:
 
     void FinishConfiguration(int thread_num) noexcept {
         for (int shard : GetConf(!is_first_main)[thread_num]) {
+            std::stringstream ss;
+            ss << "[Thread " << thread_num << "] : releasing shard " << shard << std::endl;
+            std::cout << ss.str();
             shard_mutexes[shard].unlock();
         }
     }
@@ -90,6 +93,9 @@ public:
         reshard_waiting_timer[thread_num].Reset();
         for (int shard : GetConf(!is_first_main)[thread_num]) {
             shard_mutexes[shard].lock();
+            std::stringstream ss;
+            ss << "[Thread " << thread_num << "] : taking shard " << shard << std::endl;
+            std::cout << ss.str();
         }
         can_be_updated[thread_num] = true;
         controller.OnSwitch(thread_num, GetConf(is_first_local[thread_num])[thread_num]);
@@ -309,14 +315,21 @@ template <typename ... Args>
 const uint64_t MessagePassingController<Args...>::wait_for_message_time = 1e3; // 1ms
 
 // TODO: fix constructor name
-// TODO  sharder is singleton, not a variable
 template <typename ... Args>
 class DynamicallyShardedMessagePassingPool {
 public:
 public:
-    DynamicallyShardedMessagePassingPool();
+    DynamicallyShardedMessagePassingPool()
+        : controller(),
+          sharder(controller)
+    {
+    }
+
     static void Run() noexcept {
+        sharder.Run();
     }
 private:
+    MessagePassingController<Args...> controller;
     Sharder<MessagePassingController<Args...>> sharder;
 };
+
