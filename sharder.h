@@ -1,10 +1,15 @@
+#pragma once
+
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <cassert>
+#include <sstream>
 
 #include "types.h"
 #include "timers.h"
 #include "message_passing_tree.h"
+#include "exception_top_proto_storage.h"
 
 //TODO: check sizeof
 struct ShadowCounter {
@@ -12,15 +17,15 @@ struct ShadowCounter {
     unsigned noupdate_counter:7;
 };
 
-typedef ReshardingConf = Vector<Vector<int>>;
+using ReshardingConf = Vector<Vector<int>>;
 
 // TODO: fix the book with class variables
 template <typename Controller>
-class Sharder<Controller> {
+class Sharder {
 public:
     Sharder(Controller& controller)
         : controller(controller),
-          threads_count(std::min(std::thread::hardware_concurrency, controller.GetMaxThreadsCount())),
+          threads_count(std::min(static_cast<size_t>(std::thread::hardware_concurrency()), controller.GetMaxThreadsCount())),
           first_conf(controller.GetInitialSharding(threads_count))  ,
           second_conf(),
           shadow_counter({true, 0}),
@@ -28,12 +33,12 @@ public:
           shard_mutexes(controller.GetShardsCount()),
           can_be_updated(threads_count, true),
           is_first_local(threads_count, false),
-          reshard_waiting_timer(threads_count, {time_between_reshards})
+          reshard_waiting_timer(threads_count, WaitingTimer{time_between_reshards})
     {
-        assert(threads_count == first_conf.size());
+        assert(static_cast<size_t>(threads_count) == first_conf.size());
     }
 
-    ReshardingConf>& GetConf(bool is_first) noexcept {
+    ReshardingConf& GetConf(bool is_first) noexcept {
         if (is_first) {
             return first_conf;
         } else {
@@ -56,8 +61,9 @@ public:
     void NoUpdatePromise(int thread_num) noexcept {
         if (can_be_updated[thread_num]) {
             ShadowCounter old_counter = shadow_counter.load(std::memory_order_relaxed);
+            ShadowCounter new_counter;
             do {
-                ShadowCounter new_counter = old_counter;
+                new_counter = old_counter;
                 ++new_counter.noupdate_counter;
             } while (!shadow_counter.compare_exchange_weak(old_counter, new_counter,
                         std::memory_order_acquire, std::memory_order_relaxed));
@@ -68,10 +74,10 @@ public:
     //TODO fix book definition of function (reference)
     Vector<int> GetShards(int thread_num) noexcept {
         ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
-        if (current_counter.is_first_main != is_first_local) {
+        if (current_counter.is_first_main != is_first_local[thread_num]) {
             SwitchConfiguration(thread_num);
         }
-        return GetConf(is_first_local[thread_num])[thead_num];
+        return GetConf(is_first_local[thread_num])[thread_num];
     }
 
     void SwitchConfiguration(int thread_num) noexcept {
@@ -81,8 +87,9 @@ public:
     }
 
     void FinishConfiguration(int thread_num) noexcept {
-        for (int shard : GetConf(!is_first_main)[thread_num]) {
-            std::stringstream ss;
+        ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
+        for (int shard : GetConf(!current_counter.is_first_main)[thread_num]) {
+            std::ostringstream ss;
             ss << "[Thread " << thread_num << "] : releasing shard " << shard << std::endl;
             std::cout << ss.str();
             shard_mutexes[shard].unlock();
@@ -90,10 +97,11 @@ public:
     }
 
     void StartConfiguration(int thread_num) noexcept {
+        ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
         reshard_waiting_timer[thread_num].Reset();
-        for (int shard : GetConf(!is_first_main)[thread_num]) {
+        for (int shard : GetConf(!current_counter.is_first_main)[thread_num]) {
             shard_mutexes[shard].lock();
-            std::stringstream ss;
+            std::ostringstream ss;
             ss << "[Thread " << thread_num << "] : taking shard " << shard << std::endl;
             std::cout << ss.str();
         }
@@ -104,13 +112,15 @@ public:
     //TODO fix the book with variable name
     //TODO fix book with startconfiguration and finishconfiguration calls
     void ThreadAction(int thread_num) noexcept {
-        exception top keeper.SetPath("file " + std::to_string(thread_num));
+        exception_top_keeper.SetPath("file " + std::to_string(thread_num));
         StartConfiguration(thread_num);
         while (true) {
-            exception_top_keeper.WithCatchingException([thread_num] {
+            exception_top_keeper.WithCatchingException([thread_num, this] {
                 Vector<int> shards = GetShards(thread_num);
                 controller.PreProcess(thread_num, can_be_updated[thread_num]);
-                controller.ProcessShard(shard_num, thread_num, can_be_updated[thread_num]);
+                for (int shard_num : shards) {
+                    controller.ProcessShard(shard_num, thread_num, can_be_updated[thread_num]);
+                }
                 if (reshard_waiting_timer[thread_num].CheckTime()) {
                     NoUpdatePromise(thread_num);
                     if (thread_num == 0) {
@@ -123,7 +133,7 @@ public:
 
     void Run() noexcept {
         for (int i = 1; i < threads_count; ++i) {
-            threads.push_back(std::thread(ThreadAction, this, i));
+            threads.push_back(std::thread(&Sharder<Controller>::ThreadAction, this, i));
         }
         ThreadAction(0);
         for (auto& one_thread : threads) {
@@ -140,12 +150,18 @@ private:
     Vector<std::mutex> shard_mutexes;
     Vector<bool> can_be_updated;
     Vector<bool> is_first_local;
-    Vector<bool> reshard_waiting_timer;
+    Vector<WaitingTimer> reshard_waiting_timer;
     static const uint64_t time_between_reshards;
 };
 
 template <typename Controller>
 const uint64_t Sharder<Controller>::time_between_reshards = 1e6; // 1s
+
+class DummyLockable {
+public:
+    void lock() {}
+    void unlock() {}
+};
 
 //TODO update signatures in the book
 template <typename ... Args>
@@ -162,8 +178,8 @@ public:
 
     void PreProcess(int thread_num, bool can_be_updated) {
         if (are_queues_empty[thread_num]) {
-            // TODO plug in dummy lock class
-            message_wait_cvs[thread_num].wait_for(..., std::chrono::microseconds(wait_for_message_time));
+            DummyLockable dummy_lock;
+            message_wait_cvs[thread_num].wait_for(dummy_lock, std::chrono::microseconds(wait_for_message_time));
         }
         are_queues_empty[thread_num] = true;
     }
@@ -193,7 +209,7 @@ public:
         std::vector<int> shard_thread;
         for (int thread_num= 0; thread_num < static_cast<int>(conf.size()); ++thread_num) {
             for (auto shard_num : conf[thread_num]) {
-                while (shard_thread.size() <= shard_num) {
+                while (shard_thread.size() <= static_cast<size_t>(shard_num)) {
                     shard_thread.push_back(0);
                 }
                 shard_thread[shard_num] = thread_num;
@@ -207,13 +223,13 @@ public:
     }
 
     ReshardingConf GetInitialSharding(int threads_count) {
-        message_wait_cvs.resize(threads_count);
+        message_wait_cvs = Vector<std::condition_variable_any>(threads_count);
         message_send_cvs.resize(message_passing_tree.GetEdgesCount());
         are_queues_empty.assign(threads_count, false);
         message_processor_timers.assign(message_passing_tree.GetMessageProcessorsCount(), {});
-        edge_times.assign(message_passing_tree.GetEdgesCount(), {});
-        ReshardingConf conf(threads_count, {});
-        for (auto shard_num : message_passing_tree.GetMessageProcessorsCount()) {
+        edge_timers.assign(message_passing_tree.GetEdgesCount(), {});
+        ReshardingConf conf(threads_count, Vector<int>{});
+        for (int shard_num = 0; static_cast<size_t>(shard_num) < message_passing_tree.GetMessageProcessorsCount(); ++shard_num) {
             conf[shard_num % threads_count].push_back(shard_num);
         }
         SetSenderCVS(conf);
@@ -223,10 +239,10 @@ public:
     void OnSwitch(int thread_num, const Vector<int>& new_shards) noexcept {
         for (int new_shard : new_shards) {
             for (int outgoing_edge : message_passing_tree.GetOutgoingEdges(new_shard)) {
-                message_passing_tree.GetEdgeProxy(outgoing_edge)->SetConditionVariable(&message_send_cvs[outgoing_edge]);
+                message_passing_tree.GetEdgeProxy(outgoing_edge)->SetConditionVariable(message_send_cvs[outgoing_edge]);
             }
             message_processor_timers[new_shard].Reset();
-            for (int edge : message_passing_tree.GetIncomingEdges(shard_num)) {
+            for (int edge : message_passing_tree.GetIncomingEdges(new_shard)) {
                 edge_timers[edge].Reset();
             }
         }
@@ -237,8 +253,8 @@ public:
             Vector<int64_t>* message_passing_cost) {
         *accumulated_duration += duration;
         current_thread_mps->push_back(mp);
-        available_duration_mp->erase(std::make_pair(duraction, mp));
-        for (auto duration_mp : available_duration_mp) {
+        available_duration_mp->erase(std::make_pair(duration, mp));
+        for (auto duration_mp : *available_duration_mp) {
             for (int edge : message_passing_tree.GetConnectingEdges(mp, duration_mp.second)) {
                 message_passing_cost->operator[](duration_mp.second) += edge_timers[edge].GetDurationSum();
             }
@@ -247,16 +263,16 @@ public:
 
     ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count) {
         int64_t avg_duration = 0;
-        for (int i = 0; i < message_passing_tree.GetMessageProcessorsCount(); ++i) {
+        for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetMessageProcessorsCount(); ++i) {
             avg_duration += message_processor_timers[i].GetDurationSum();
         }
-        for (int i = 0; i < message_passing_tree.GetEdgesCount(); ++i) {
+        for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetEdgesCount(); ++i) {
             avg_duration += edge_timers[i].GetDurationSum();
         }
         avg_duration /= threads_count;
-        avg_duration = std::max(avg_duration, 1);
+        avg_duration = std::max(avg_duration, int64_t(1));
         Set<std::pair<int64_t, int>> available_duration_mp;
-        for (int i = 0; i < message_passing_tree.GetMessageProcessorsCount(); ++i) {
+        for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetMessageProcessorsCount(); ++i) {
             int64_t duration = message_processor_timers[i].GetDurationSum();
             for (int j : message_passing_tree.GetIncomingEdges(i)) {
                 duration += edge_timers[j].GetDurationSum();
@@ -269,7 +285,7 @@ public:
             Vector<int> current_thread_mps;
             Vector<int64_t> message_passing_cost(message_passing_tree.GetMessageProcessorsCount(), 0);
             assert(available_duration_mp.size() > 0);
-            auto it = available_duration_mp.rbegin()
+            auto it = available_duration_mp.rbegin();
             if (it->first > avg_duration) {
                 ProcessMPChoice(it->first, it->second, &accumulated_duration,
                         &current_thread_mps, &available_duration_mp, &message_passing_cost);
@@ -301,6 +317,10 @@ public:
     size_t GetMaxThreadsCount() const noexcept {
         return message_passing_tree.GetMessageProcessorsCount();
     }
+
+    size_t GetShardsCount() const noexcept {
+        return message_passing_tree.GetMessageProcessorsCount();
+    }
 private:
     MessagePassingTree<Args...> message_passing_tree;
     Vector<std::condition_variable_any> message_wait_cvs;
@@ -325,7 +345,7 @@ public:
     {
     }
 
-    static void Run() noexcept {
+    void Run() noexcept {
         sharder.Run();
     }
 private:

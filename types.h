@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <deque>
+#include <set>
 
 #include "allocator.h"
 
