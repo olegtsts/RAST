@@ -131,4 +131,4 @@ sharder_test: sharder_test.o allocator.o timers.o exception_top_proto_storage.o 
 	g++-9 -o sharder_test sharder_test.o allocator.o timers.o exception_top_proto_storage.o exception_top_proto_storage.pb.o -O3 -pedantic -Wall -Werror -mcx16 -latomic -lpthread -lprotobuf
 
 clean:
-	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test
+	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test file\ 0 file\ 1 core

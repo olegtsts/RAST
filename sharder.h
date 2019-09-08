@@ -32,7 +32,7 @@ public:
           threads(),
           shard_mutexes(controller.GetShardsCount()),
           can_be_updated(threads_count, true),
-          is_first_local(threads_count, false),
+          is_first_local(threads_count, true),
           reshard_waiting_timer(threads_count, WaitingTimer{time_between_reshards})
     {
         assert(static_cast<size_t>(threads_count) == first_conf.size());
@@ -87,24 +87,26 @@ public:
     }
 
     void FinishConfiguration(int thread_num) noexcept {
-        ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
-        for (int shard : GetConf(!current_counter.is_first_main)[thread_num]) {
-            std::ostringstream ss;
-            ss << "[Thread " << thread_num << "] : releasing shard " << shard << std::endl;
-            std::cout << ss.str();
+        std::ostringstream ss;
+        ss << "[Thread " << thread_num << "] : releasing shards ";
+        for (int shard : GetConf(is_first_local[thread_num])[thread_num]) {
             shard_mutexes[shard].unlock();
+            ss << shard << " ";
         }
+        ss << std::endl;
+        std::cout << ss.str();
     }
 
     void StartConfiguration(int thread_num) noexcept {
-        ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
+        std::ostringstream ss;
+        ss << "[Thread " << thread_num << "] : taking shards ";
         reshard_waiting_timer[thread_num].Reset();
-        for (int shard : GetConf(!current_counter.is_first_main)[thread_num]) {
+        for (int shard : GetConf(is_first_local[thread_num])[thread_num]) {
             shard_mutexes[shard].lock();
-            std::ostringstream ss;
-            ss << "[Thread " << thread_num << "] : taking shard " << shard << std::endl;
-            std::cout << ss.str();
+            ss << shard << " ";
         }
+        ss << std::endl;
+        std::cout << ss.str();
         can_be_updated[thread_num] = true;
         controller.OnSwitch(thread_num, GetConf(is_first_local[thread_num])[thread_num]);
     }
@@ -277,6 +279,7 @@ public:
             for (int j : message_passing_tree.GetIncomingEdges(i)) {
                 duration += edge_timers[j].GetDurationSum();
             }
+            std::cout << "[Resharding] Time of " << i << " = " << duration << std::endl;
             available_duration_mp.insert(std::make_pair(duration, i));
         }
         ReshardingConf conf;
@@ -293,7 +296,7 @@ public:
                 while (available_duration_mp.size() > 0) {
                     auto chosen_it = available_duration_mp.end();
                     double largest_cost = -1;
-                    for (auto it = available_duration_mp.begin(); it != available_duration_mp.upper_bound(std::make_pair(avg_duration, 0)); ++it) {
+                    for (auto it = available_duration_mp.begin(); it != available_duration_mp.upper_bound(std::make_pair(avg_duration - accumulated_duration, 0)); ++it) {
                         if (largest_cost < message_passing_cost[it->second]) {
                             largest_cost = message_passing_cost[it->second];
                             chosen_it = it;
@@ -305,6 +308,11 @@ public:
                         ProcessMPChoice(chosen_it->first, chosen_it->second, &accumulated_duration,
                             &current_thread_mps, &available_duration_mp, &message_passing_cost);
                     }
+                }
+            }
+            if (thread_num + 1 == threads_count) {
+                for (auto duration_mp : available_duration_mp) {
+                    current_thread_mps.push_back(duration_mp.second);
                 }
             }
             assert(current_thread_mps.size() > 0);
