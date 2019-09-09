@@ -11,15 +11,13 @@
 #include "message_passing_tree.h"
 #include "exception_top_proto_storage.h"
 
-//TODO: check sizeof
 struct ShadowCounter {
     bool is_first_main:1;
-    unsigned noupdate_counter:7;
+    long long int noupdate_counter:63;
 };
 
 using ReshardingConf = Vector<Vector<int>>;
 
-// TODO: fix the book with class variables
 template <typename Controller>
 class Sharder {
 public:
@@ -71,7 +69,6 @@ public:
         }
     }
 
-    //TODO fix book definition of function (reference)
     Vector<int> GetShards(int thread_num) noexcept {
         ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
         if (current_counter.is_first_main != is_first_local[thread_num]) {
@@ -111,8 +108,6 @@ public:
         controller.OnSwitch(thread_num, GetConf(is_first_local[thread_num])[thread_num]);
     }
 
-    //TODO fix the book with variable name
-    //TODO fix book with startconfiguration and finishconfiguration calls
     void ThreadAction(int thread_num) noexcept {
         exception_top_keeper.SetPath("file " + std::to_string(thread_num));
         StartConfiguration(thread_num);
@@ -165,7 +160,6 @@ public:
     void unlock() {}
 };
 
-//TODO update signatures in the book
 template <typename ... Args>
 class MessagePassingController {
 public:
@@ -352,7 +346,6 @@ private:
 template <typename ... Args>
 const uint64_t MessagePassingController<Args...>::wait_for_message_time = 1e3; // 1ms
 
-// TODO: fix constructor name
 template <typename ... Args>
 class DynamicallyShardedMessagePassingPool {
 public:
