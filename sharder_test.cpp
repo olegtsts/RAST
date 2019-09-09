@@ -16,8 +16,9 @@ public:
     using MessageProcessorBase::MessageProcessorBase;
 
     template <typename Sender>
-    void Ping(const Sender& sender) {
+    bool Ping(const Sender& sender) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return true;
     }
 };
 
@@ -26,8 +27,9 @@ public:
     using MessageProcessorBase::MessageProcessorBase;
 
     template <typename Sender>
-    void Ping(const Sender& sender) {
+    bool Ping(const Sender& sender) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return true;
     }
 };
 
@@ -36,8 +38,9 @@ public:
     using MessageProcessorBase::MessageProcessorBase;
 
     template <typename Sender>
-    void Ping(const Sender& sender) {
+    bool Ping(const Sender& sender) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        return true;
     }
 
     template <typename Sender>

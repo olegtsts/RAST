@@ -91,7 +91,7 @@ public:
         ss << "[Thread " << thread_num << "] : releasing shards ";
         for (int shard : GetConf(is_first_local[thread_num])[thread_num]) {
             shard_mutexes[shard].unlock();
-            ss << shard << " ";
+            ss << controller.GetShardName(shard) << " ";
         }
         ss << std::endl;
         std::cout << ss.str();
@@ -103,7 +103,7 @@ public:
         reshard_waiting_timer[thread_num].Reset();
         for (int shard : GetConf(is_first_local[thread_num])[thread_num]) {
             shard_mutexes[shard].lock();
-            ss << shard << " ";
+            ss << controller.GetShardName(shard) << " ";
         }
         ss << std::endl;
         std::cout << ss.str();
@@ -173,24 +173,26 @@ public:
         : message_passing_tree(),
           message_wait_cvs(),
           message_send_cvs(),
-          are_queues_empty(),
+          is_active(),
           message_processor_timers(),
           edge_timers()
     {}
 
     void PreProcess(int thread_num, bool can_be_updated) {
-        if (are_queues_empty[thread_num]) {
+        if (!is_active[thread_num]) {
             DummyLockable dummy_lock;
             message_wait_cvs[thread_num].wait_for(dummy_lock, std::chrono::microseconds(wait_for_message_time));
         }
-        are_queues_empty[thread_num] = true;
+        is_active[thread_num] = false;
     }
 
     void ProcessShard(int shard_num, int thread_num, bool can_be_updated) {
         if (can_be_updated) {
             message_processor_timers[shard_num].Start();
         }
-        message_passing_tree.GetMessageProcessorProxy(shard_num)->Ping();
+        if (message_passing_tree.GetMessageProcessorProxy(shard_num)->Ping()) {
+            is_active[thread_num] = true;
+        }
         if (can_be_updated) {
             message_processor_timers[shard_num].Finish();
         }
@@ -199,7 +201,7 @@ public:
                 edge_timers[edge].Start();
             }
             if (message_passing_tree.GetEdgeProxy(edge)->NotifyAboutMessage()) {
-                are_queues_empty[thread_num] = false;
+                is_active[thread_num] = true;
             }
             if (can_be_updated) {
                 edge_timers[edge].Finish();
@@ -227,7 +229,7 @@ public:
     ReshardingConf GetInitialSharding(int threads_count) {
         message_wait_cvs = Vector<std::condition_variable_any>(threads_count);
         message_send_cvs.resize(message_passing_tree.GetEdgesCount());
-        are_queues_empty.assign(threads_count, false);
+        is_active.assign(threads_count, true);
         message_processor_timers.assign(message_passing_tree.GetMessageProcessorsCount(), {});
         edge_timers.assign(message_passing_tree.GetEdgesCount(), {});
         ReshardingConf conf(threads_count, Vector<int>{});
@@ -258,7 +260,7 @@ public:
         available_duration_mp->erase(std::make_pair(duration, mp));
         for (auto duration_mp : *available_duration_mp) {
             for (int edge : message_passing_tree.GetConnectingEdges(mp, duration_mp.second)) {
-                message_passing_cost->operator[](duration_mp.second) += edge_timers[edge].GetDurationSum();
+                message_passing_cost->operator[](duration_mp.second) += edge_timers[edge].GetAverageDuration();
             }
         }
     }
@@ -266,20 +268,22 @@ public:
     ReshardingConf GetResharding(const ReshardingConf& old_conf, int threads_count) {
         int64_t avg_duration = 0;
         for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetMessageProcessorsCount(); ++i) {
-            avg_duration += message_processor_timers[i].GetDurationSum();
+            avg_duration += message_processor_timers[i].GetAverageDuration();
         }
         for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetEdgesCount(); ++i) {
-            avg_duration += edge_timers[i].GetDurationSum();
+            avg_duration += edge_timers[i].GetAverageDuration();
         }
         avg_duration /= threads_count;
         avg_duration = std::max(avg_duration, int64_t(1));
         Set<std::pair<int64_t, int>> available_duration_mp;
         for (int i = 0; static_cast<size_t>(i) < message_passing_tree.GetMessageProcessorsCount(); ++i) {
-            int64_t duration = message_processor_timers[i].GetDurationSum();
+            int64_t duration = message_processor_timers[i].GetAverageDuration();
+            int64_t all_duration = message_processor_timers[i].GetDurationSum();
             for (int j : message_passing_tree.GetIncomingEdges(i)) {
-                duration += edge_timers[j].GetDurationSum();
+                duration += edge_timers[j].GetAverageDuration();
+                all_duration += edge_timers[j].GetDurationSum();
             }
-            std::cout << "[Resharding] Time of " << i << " = " << duration << std::endl;
+            std::cout << "[Resharding] Time of " << GetShardName(i) << " = " << duration << ", total = " << all_duration << std::endl;
             available_duration_mp.insert(std::make_pair(duration, i));
         }
         ReshardingConf conf;
@@ -329,11 +333,17 @@ public:
     size_t GetShardsCount() const noexcept {
         return message_passing_tree.GetMessageProcessorsCount();
     }
+
+    std::string GetShardName(int shard_num) noexcept {
+        std::string name = message_passing_tree.GetMessageProcessorProxy(shard_num)->GetName();
+        name.erase(std::remove_if(name.begin(), name.end(), [](char c) { return !isalpha(c); } ), name.end());
+        return name;
+    }
 private:
     MessagePassingTree<Args...> message_passing_tree;
     Vector<std::condition_variable_any> message_wait_cvs;
     Vector<std::condition_variable_any *> message_send_cvs;
-    Vector<bool> are_queues_empty;
+    Vector<bool> is_active;
     Vector<StartFinishTimer> message_processor_timers;
     Vector<StartFinishTimer> edge_timers;
     static const uint64_t wait_for_message_time;

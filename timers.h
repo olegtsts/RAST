@@ -9,10 +9,11 @@ public:
     PeriodicTimer() noexcept;
     int64_t GetPassedTime() noexcept;
     void Reset() noexcept;
+public:
+    static const int64_t min_measured_time;
 private:
     static const int64_t min_system_click_call_period;
     static const int64_t max_wind_up_steps;
-    static const int64_t min_measured_time;
     int64_t wind_up_counter;
     int64_t wind_up_balance;
     int64_t last_wind_up_counter;
@@ -27,6 +28,7 @@ public:
     void Finish() noexcept;
     uint64_t GetCount() noexcept;
     int64_t GetDurationSum() noexcept;
+    int64_t GetAverageDuration() noexcept;
     void Reset() noexcept;
 private:
     PeriodicTimer start_timer;

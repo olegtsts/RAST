@@ -72,6 +72,14 @@ int64_t StartFinishTimer::GetDurationSum() noexcept {
     return duration_sum;
 }
 
+int64_t StartFinishTimer::GetAverageDuration() noexcept {
+    if (measurements_counter > 0) {
+        return std::max(static_cast<int64_t>(duration_sum / measurements_counter), PeriodicTimer::min_measured_time);
+    } else {
+        return PeriodicTimer::min_measured_time;
+    }
+}
+
 void StartFinishTimer::Reset() noexcept {
     start_timer.Reset();
     finish_timer.Reset();

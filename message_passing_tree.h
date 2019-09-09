@@ -14,7 +14,12 @@ class Edge{};
 class MessageProcessorBase {
 public:
     template <typename Sender>
-    void Ping(const Sender&) {}
+    bool Ping(const Sender&) {
+        return true;
+    }
+    std::string GetName() const noexcept {
+        return {};
+    }
 
     virtual ~MessageProcessorBase() noexcept {}
 };
@@ -56,7 +61,10 @@ protected:
             return *dynamic_cast<MP*>(piper.message_processors[message_processor_index].get());
         }
 
-        virtual void Ping() const = 0;
+        virtual bool Ping() const = 0;
+
+        virtual std::string GetName() const noexcept = 0;
+
         virtual ~MessageProcessorProxy() {}
     protected:
         GlobalPiper& piper;
@@ -122,9 +130,12 @@ protected:
         using Piper<>::MessageProcessorProxy<GlobalPiper>::MessageProcessorProxy;
         using Piper<>::MessageProcessorProxy<GlobalPiper>::piper;
 
-        virtual void Ping() const {
+        virtual bool Ping() const {
             auto& message_processor = MessageProcessorProxy::template GetMessageProcessor<MP>();
-            message_processor.Ping(SenderProxy<GlobalPiper, MP>(piper));
+            return message_processor.Ping(SenderProxy<GlobalPiper, MP>(piper));
+        }
+        virtual std::string GetName() const noexcept {
+            return typeid(MP).name();
         }
     };
 
