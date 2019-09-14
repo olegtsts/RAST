@@ -205,7 +205,7 @@ public:
 
     void SetSenderCVS(const ReshardingConf& conf) {
         std::vector<int> shard_thread;
-        for (int thread_num= 0; thread_num < static_cast<int>(conf.size()); ++thread_num) {
+        for (int thread_num = 0; thread_num < static_cast<int>(conf.size()); ++thread_num) {
             for (auto shard_num : conf[thread_num]) {
                 while (shard_thread.size() <= static_cast<size_t>(shard_num)) {
                     shard_thread.push_back(0);
