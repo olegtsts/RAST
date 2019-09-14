@@ -38,9 +38,10 @@ public:
     using MessageProcessorBase::MessageProcessorBase;
 
     template <typename Sender>
-    void Ping(const Sender& sender) {
+    bool Ping(const Sender& sender) {
         std::cout << "Called Ping to MessageProcessorB\n";
         sender.template Send<MessageProcessorA>(std::make_unique<DoubleMessage>(1.0));
+        return true;
     }
 
     template <typename Sender>

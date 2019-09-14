@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test
 
 allocator_test: allocator.o allocator_test.o
 	g++-9 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
@@ -120,5 +120,15 @@ exception_top_proto_storage_test.o: exception_top_proto_storage_test.cpp excepti
 exception_top_proto_storage_test: exception_top_proto_storage_test.o exception_top_proto_storage.o exception_top_proto_storage.pb.o exception_with_backtrace.o timers.o allocator.o
 	g++-9 -o exception_top_proto_storage_test exception_top_proto_storage_test.o exception_top_proto_storage.o exception_top_proto_storage.pb.o exception_with_backtrace.o timers.o allocator.o -O3 -pedantic -Wall -Werror -lstdc++fs -lprotobuf -lunwind -lbacktrace -ldl
 
+
+sharder.lib: sharder.h types.lib timers.o message_passing_tree.lib exception_top_proto_storage.o
+	touch sharder.lib
+
+sharder_test.o: sharder_test.cpp sharder.lib message_passing_tree.lib
+	g++-9 sharder_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+sharder_test: sharder_test.o allocator.o timers.o exception_top_proto_storage.o exception_top_proto_storage.pb.o
+	g++-9 -o sharder_test sharder_test.o allocator.o timers.o exception_top_proto_storage.o exception_top_proto_storage.pb.o -O3 -pedantic -Wall -Werror -mcx16 -latomic -lpthread -lprotobuf
+
 clean:
-	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test
+	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test file\ 0 file\ 1 core

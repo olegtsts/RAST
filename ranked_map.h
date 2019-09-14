@@ -87,6 +87,6 @@ public:
     }
 
 private:
-    UnoderedMap<TKey, TValue, THash> key_value;
+    UnorderedMap<TKey, TValue, THash> key_value;
     Set<std::pair<TValue, TKey>> value_key;
 };

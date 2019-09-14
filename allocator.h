@@ -68,7 +68,7 @@ public:
     FreeListMultiLevelAllocator();
     FreeListMultiLevelAllocator (const FreeListMultiLevelAllocator &) = delete;
     FreeListMultiLevelAllocator(FreeListMultiLevelAllocator&&) = delete;
-    FreeListMultiLevelAllocator & operator =(const FreeListMultiLevelAllocator &) = delete;
+    FreeListMultiLevelAllocator & operator=(const FreeListMultiLevelAllocator &) = delete;
 
     template <typename T>
     T* Allocate(size_t size) {
@@ -103,6 +103,14 @@ public:
     }
     void deallocate (T* p, size_t n) noexcept {
         global_allocator.Deallocate(p);
+    }
+    template <typename T2>
+    bool operator== (const FixedFreeListMultiLevelAllocator<T2>& other) const noexcept {
+        return true;
+    }
+    template <typename T2>
+    bool operator!= (const FixedFreeListMultiLevelAllocator<T2>& other) const noexcept {
+        return false;
     }
     using value_type=T;
     using size_type=size_t;
