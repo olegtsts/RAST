@@ -24,7 +24,7 @@ public:
     Sharder(Controller& controller)
         : controller(controller),
           threads_count(std::min(static_cast<size_t>(std::thread::hardware_concurrency()), controller.GetMaxThreadsCount())),
-          first_conf(controller.GetInitialSharding(threads_count))  ,
+          first_conf(controller.GetInitialSharding(threads_count)),
           second_conf(),
           shadow_counter({true, 0}),
           threads(),
