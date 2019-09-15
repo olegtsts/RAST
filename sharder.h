@@ -70,9 +70,11 @@ public:
     }
 
     Vector<int> GetShards(int thread_num) noexcept {
-        ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
-        if (current_counter.is_first_main != is_first_local[thread_num]) {
-            SwitchConfiguration(thread_num);
+        if (!can_be_updated[thread_num]) {
+            ShadowCounter current_counter = shadow_counter.load(std::memory_order_acquire);
+            if (current_counter.is_first_main != is_first_local[thread_num]) {
+                SwitchConfiguration(thread_num);
+            }
         }
         return GetConf(is_first_local[thread_num])[thread_num];
     }
