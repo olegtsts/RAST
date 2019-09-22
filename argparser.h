@@ -30,7 +30,7 @@ private:
     };
 
     template <typename ArgEntity>
-    class ArgProcessor : public ArgProcessorBase {
+    class ArgProcessorWithoutDefaultValue : public ArgProcessorBase {
     public:
         virtual void Parse(const std::string& raw_value) final {
             ParseArgValue(raw_value, &value);
@@ -48,6 +48,23 @@ private:
 
         typename ArgEntity::type value = {};
         bool is_initialized = false;
+    };
+
+    template <typename ArgEntity, typename = int>
+    class ArgProcessor : public ArgProcessorWithoutDefaultValue<ArgEntity> {
+    public:
+        std::optional<typename ArgEntity::type> GetDefaultValue() {
+            return {};
+        }
+    };
+
+    template <typename ArgEntity>
+    class ArgProcessor<ArgEntity, decltype((void) ArgEntity::default_value, 0)> : public ArgProcessorWithoutDefaultValue<ArgEntity> {
+    public:
+        std::optional<typename ArgEntity::type> GetDefaultValue() {
+            ArgEntity arg_entity;
+            return arg_entity.default_value;
+        }
     };
 
     std::string GetHelpString();
@@ -76,12 +93,18 @@ public:
         auto it = GetInstance().arg_processors.find(arg_entity.name);
         assert(it != GetInstance().arg_processors.end());
         ArgProcessor<ArgEntity> * storage = dynamic_cast<ArgProcessor<ArgEntity> *>(it->second.get());
-        if (!storage->is_initialized) {
-            std::stringstream ss;
-            ss << "Flag '" << arg_entity.name << "' is not initialized";
-            throw ExceptionWithBacktrace(ss.str());
+        if (storage->is_initialized) {
+            return storage->value;
+        } else {
+            std::optional<typename ArgEntity::type> default_value = storage->GetDefaultValue();
+            if (default_value.has_value()) {
+                return default_value.value();
+            } else {
+                std::stringstream ss;
+                ss << "Flag '" << arg_entity.name << "' is not initialized and does not have default value";
+                throw ExceptionWithBacktrace(ss.str());
+            }
         }
-        return storage->value;
     }
 private:
     UnorderedMap<std::string, std::unique_ptr<ArgProcessorBase>, std::hash<std::string>> arg_processors;

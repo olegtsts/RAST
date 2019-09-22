@@ -136,7 +136,7 @@ auto_registrar.lib: auto_registrar.h
 argparser.o: argparser.h argparser.cpp types.lib auto_registrar.lib
 	g++-9 argparser.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
-argparser_test.o: argparser_test.cpp
+argparser_test.o: argparser_test.cpp argparser.o
 	g++-9 argparser_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
 
 argparser_test: argparser.o argparser_test.o exception_with_backtrace.o auto_registrar.lib

@@ -2,6 +2,7 @@
 #include <sstream>
 #include "argparser.h"
 #include <iostream>
+#include <algorithm>
 
 void ArgParser::ParseArgValue(const std::string& arg_value, int* value) {
     std::stringstream ss(arg_value);
@@ -19,6 +20,8 @@ std::string ArgParser::GetHelpString() {
 // TODO: write proper implementation
 void ArgParser::SetArgV(int argc, char **argv) {
     std::cout << GetInstance().GetHelpString();
-    GetInstance().arg_processors["arg"]->Parse("123");
+    if (GetInstance().arg_processors.count("arg") > 0) {
+        GetInstance().arg_processors["arg"]->Parse("123");
+    }
 }
 
