@@ -27,11 +27,11 @@ private:
     class ArgProcessorBase {
     public:
         virtual void Parse(const std::string& raw_value) = 0;
-        virtual std::string GetEntityName() = 0;
-        virtual std::string GetDescription() = 0;
-        virtual bool IsInitialized() = 0;
-        virtual bool IsBool() = 0;
-        virtual bool HasDefaultValue() = 0;
+        virtual std::string GetEntityName() const noexcept = 0;
+        virtual std::string GetDescription() const noexcept = 0;
+        virtual bool IsInitialized() const noexcept = 0;
+        virtual bool IsBool() const noexcept = 0;
+        virtual bool HasDefaultValue() const noexcept = 0;
     };
 
     template <typename ArgEntity>
@@ -49,37 +49,39 @@ private:
             is_value_initialized = true;
         }
 
-        virtual std::string GetEntityName() {
+        virtual std::string GetEntityName() const noexcept {
             return typeid(ArgEntity).name();
         }
 
-        virtual std::string GetDescription() {
+        virtual std::string GetDescription() const noexcept {
             ArgEntity arg_entity;
             return arg_entity.description;
         }
 
-        virtual bool IsBool() {
+        virtual bool IsBool() const noexcept {
             return typeid(typename ArgEntity::type).hash_code() == typeid(bool).hash_code();
         }
 
-        virtual bool IsInitialized() {
+        virtual bool IsInitialized() const noexcept {
             return is_value_initialized;
         }
 
-        virtual bool HasDefaultValue() = 0;
+        virtual bool HasDefaultValue() const noexcept = 0;
 
         typename ArgEntity::type value = {};
+
+    private:
         bool is_value_initialized = false;
     };
 
     template <typename ArgEntity, typename = int>
     class ArgProcessor : public ArgProcessorWithoutDefaultValue<ArgEntity> {
     public:
-        virtual bool HasDefaultValue() {
+        virtual bool HasDefaultValue() const noexcept {
             return false;
         }
 
-        std::optional<typename ArgEntity::type> GetDefaultValue() {
+        std::optional<typename ArgEntity::type> GetDefaultValue() const noexcept {
             return {};
         }
     };
@@ -87,17 +89,17 @@ private:
     template <typename ArgEntity>
     class ArgProcessor<ArgEntity, decltype((void) ArgEntity::default_value, 0)> : public ArgProcessorWithoutDefaultValue<ArgEntity> {
     public:
-        virtual bool HasDefaultValue() {
+        virtual bool HasDefaultValue() const noexcept {
             return true;
         }
 
-        std::optional<typename ArgEntity::type> GetDefaultValue() {
+        std::optional<typename ArgEntity::type> GetDefaultValue() const noexcept {
             ArgEntity arg_entity;
             return arg_entity.default_value;
         }
     };
 
-    std::string GetHelpString();
+    std::string GetHelpString() const;
 public:
     template <typename ArgEntity>
     static void Register() {

@@ -12,7 +12,7 @@ public:
         Registry::template Register<Entity>();
     }
 
-    static void AutoRegister() {
+    static void AutoRegister() noexcept {
         (void)auto_registrator<Registry, Entity>;
     }
 };

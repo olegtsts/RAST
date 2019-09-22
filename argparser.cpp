@@ -24,7 +24,7 @@ bool ArgParser::ParseArgValue(const std::string& arg_value, bool* value) {
     return false;
 }
 
-std::string ArgParser::GetHelpString() {
+std::string ArgParser::GetHelpString() const {
     std::stringstream ss;
     for (const auto& arg_and_processor : arg_processors) {
         ss << arg_and_processor.first << " : " << arg_and_processor.second->GetDescription() << std::endl;
