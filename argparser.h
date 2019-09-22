@@ -12,7 +12,9 @@
 
 class ArgParser {
 private:
-    static void ParseArgValue(const std::string& arg_value, int* value);
+    static bool ParseArgValue(const std::string& arg_value, int* value);
+    static bool ParseArgValue(const std::string& arg_value, bool* value);
+
 
     ArgParser() {
     }
@@ -27,14 +29,24 @@ private:
         virtual void Parse(const std::string& raw_value) = 0;
         virtual std::string GetEntityName() = 0;
         virtual std::string GetDescription() = 0;
+        virtual bool IsInitialized() = 0;
+        virtual bool IsBool() = 0;
+        virtual bool HasDefaultValue() = 0;
     };
 
     template <typename ArgEntity>
     class ArgProcessorWithoutDefaultValue : public ArgProcessorBase {
     public:
         virtual void Parse(const std::string& raw_value) final {
-            ParseArgValue(raw_value, &value);
-            is_initialized = true;
+            if (!ParseArgValue(raw_value, &value)) {
+                std::stringstream ss;
+                ArgEntity arg_entity;
+                ss << "Failed to parse value '" << raw_value <<
+                    "' of arg '" << arg_entity.name << "' of type '" <<
+                    typeid(typename ArgEntity::type).name() << "'";
+                throw ExceptionWithBacktrace(ss.str());
+            }
+            is_value_initialized = true;
         }
 
         virtual std::string GetEntityName() {
@@ -46,13 +58,27 @@ private:
             return arg_entity.description;
         }
 
+        virtual bool IsBool() {
+            return typeid(typename ArgEntity::type).hash_code() == typeid(bool).hash_code();
+        }
+
+        virtual bool IsInitialized() {
+            return is_value_initialized;
+        }
+
+        virtual bool HasDefaultValue() = 0;
+
         typename ArgEntity::type value = {};
-        bool is_initialized = false;
+        bool is_value_initialized = false;
     };
 
     template <typename ArgEntity, typename = int>
     class ArgProcessor : public ArgProcessorWithoutDefaultValue<ArgEntity> {
     public:
+        virtual bool HasDefaultValue() {
+            return false;
+        }
+
         std::optional<typename ArgEntity::type> GetDefaultValue() {
             return {};
         }
@@ -61,6 +87,10 @@ private:
     template <typename ArgEntity>
     class ArgProcessor<ArgEntity, decltype((void) ArgEntity::default_value, 0)> : public ArgProcessorWithoutDefaultValue<ArgEntity> {
     public:
+        virtual bool HasDefaultValue() {
+            return true;
+        }
+
         std::optional<typename ArgEntity::type> GetDefaultValue() {
             ArgEntity arg_entity;
             return arg_entity.default_value;
@@ -92,18 +122,13 @@ public:
         ArgEntity arg_entity;
         auto it = GetInstance().arg_processors.find(arg_entity.name);
         assert(it != GetInstance().arg_processors.end());
-        ArgProcessor<ArgEntity> * storage = dynamic_cast<ArgProcessor<ArgEntity> *>(it->second.get());
-        if (storage->is_initialized) {
-            return storage->value;
+        ArgProcessor<ArgEntity> * arg_processor = dynamic_cast<ArgProcessor<ArgEntity> *>(it->second.get());
+        if (arg_processor->IsInitialized()) {
+            return arg_processor->value;
         } else {
-            std::optional<typename ArgEntity::type> default_value = storage->GetDefaultValue();
-            if (default_value.has_value()) {
-                return default_value.value();
-            } else {
-                std::stringstream ss;
-                ss << "Flag '" << arg_entity.name << "' is not initialized and does not have default value";
-                throw ExceptionWithBacktrace(ss.str());
-            }
+            std::optional<typename ArgEntity::type> default_value = arg_processor->GetDefaultValue();
+            assert(default_value.has_value());
+            return default_value.value();
         }
     }
 private:
