@@ -3,6 +3,7 @@
 #include <vector>
 #include <deque>
 #include <set>
+#include <unordered_map>
 
 #include "allocator.h"
 

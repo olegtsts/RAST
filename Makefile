@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test argparser_test
 
 allocator_test: allocator.o allocator_test.o
 	g++-9 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
@@ -130,5 +130,18 @@ sharder_test.o: sharder_test.cpp sharder.lib message_passing_tree.lib
 sharder_test: sharder_test.o allocator.o timers.o exception_top_proto_storage.o exception_top_proto_storage.pb.o
 	g++-9 -o sharder_test sharder_test.o allocator.o timers.o exception_top_proto_storage.o exception_top_proto_storage.pb.o -O3 -pedantic -Wall -Werror -mcx16 -latomic -lpthread -lprotobuf
 
+auto_registrar.lib: auto_registrar.h
+	touch auto_registrar.lib
+
+argparser.o: argparser.h argparser.cpp types.lib auto_registrar.lib
+	g++-9 argparser.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+argparser_test.o: argparser_test.cpp
+	g++-9 argparser_test.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+
+argparser_test: argparser.o argparser_test.o exception_with_backtrace.o auto_registrar.lib
+	g++-9 -o argparser_test argparser.o argparser_test.o exception_with_backtrace.o allocator.o -O3 -pedantic -Wall -Werror -lbacktrace -ldl
+
+
 clean:
-	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test file\ 0 file\ 1 core
+	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test file\ 0 file\ 1 core argparser_test
