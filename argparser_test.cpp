@@ -29,7 +29,7 @@ struct ThirdArg {
     std::string name = "arg3";
     std::string description = "some description 3";
     using type = bool;
-    int default_value = false;
+    bool default_value = false;
 };
 
 void ThirdFunc() {
