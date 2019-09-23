@@ -119,7 +119,7 @@ public:
     static void SetArgV(int argc, char **argv);
 
     template <typename ArgEntity>
-    static typename ArgEntity::type GetValue() {
+    static typename ArgEntity::type GetValue() noexcept {
         AutoRegistrar<ArgParser, ArgEntity>::AutoRegister();
         ArgEntity arg_entity;
         auto it = GetInstance().arg_processors.find(arg_entity.name);
