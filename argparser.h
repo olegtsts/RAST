@@ -15,7 +15,6 @@ private:
     static bool ParseArgValue(const std::string& arg_value, int* value);
     static bool ParseArgValue(const std::string& arg_value, bool* value);
 
-
     ArgParser() {
     }
 
@@ -100,6 +99,7 @@ private:
     };
 
     std::string GetHelpString() const;
+    static bool IsStringFlag(const std::string& input_string);
 public:
     template <typename ArgEntity>
     static void Register() {
@@ -116,7 +116,7 @@ public:
         }
     }
 
-    static void SetArgV(int argc, char **argv);
+    static bool SetArgV(int argc, char **argv);
 
     template <typename ArgEntity>
     static typename ArgEntity::type GetValue() noexcept {

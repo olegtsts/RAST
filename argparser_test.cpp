@@ -38,7 +38,9 @@ void ThirdFunc() {
 }
 
 int main(int argc, char** argv) {
-    ArgParser::SetArgV(argc, argv);
+    if (!ArgParser::SetArgV(argc, argv)) {
+        return 0;
+    }
     SecondFunc();
     ThirdFunc();
     return 0;

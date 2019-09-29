@@ -1,7 +1,6 @@
 #include <string>
 #include <sstream>
 #include <iostream>
-#include <vector>
 #include <algorithm>
 
 #include "argparser.h"
@@ -32,49 +31,53 @@ std::string ArgParser::GetHelpString() const {
     return ss.str();
 }
 
-void ArgParser::SetArgV(int argc, char **argv) {
-    std::string joined_string;
+bool ArgParser::IsStringFlag(const std::string& input_string) {
+    bool first_symbol_after_dash_is_letter = false;
+    for (auto ch: input_string) {
+        if (ch != '-') {
+            first_symbol_after_dash_is_letter = ch >= 'a' && ch <= 'z';
+            break;
+        }
+    }
+    return input_string.size() > 0 && input_string[0] == '-' && first_symbol_after_dash_is_letter;
+}
+
+bool ArgParser::SetArgV(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
-        joined_string += argv[i];
-        joined_string += ' ';
-    }
-    for (char symbol : {'-', '='}) {
-        std::replace(joined_string.begin(), joined_string.end(), symbol, ' ');
-    }
-    std::stringstream ss(joined_string);
-    std::vector<std::string> tokens;
-    while (!ss.eof()) {
-        std::string token;
-        ss >> token;
-        tokens.push_back(token);
-    }
-    size_t index = 0;
-    std::string arg_name;
-    while (index < tokens.size()) {
-        if (arg_name.empty()) {
-            arg_name = tokens[index];
-            ++index;
+        std::string arg_string(argv[i]);
+        if (!IsStringFlag(arg_string)) {
+            std::stringstream ss;
+            ss << "Token '" << arg_string << "' does not look like flag name. Flag name should start with '-'.";
+            throw ExceptionWithBacktrace(ss.str());
+        }
+        std::string flag, value;
+        size_t separator_index = arg_string.find('=');
+        if (separator_index == std::string::npos) {
+            flag = arg_string;
+            if (i + 1 != argc && !IsStringFlag(argv[i + 1])) {
+                value = argv[++i];
+            }
         } else {
-            if (arg_name == "help") {
-                std::cout << GetInstance().GetHelpString();
-                return;
-            }
-            auto it = GetInstance().arg_processors.find(arg_name);
-            if (it == GetInstance().arg_processors.end()) {
-                std::stringstream ss;
-                ss << "Encountered unregistered arg '" << arg_name << "'. Use --help to list registered args.";
-                throw ExceptionWithBacktrace(ss.str());
-            }
-            ArgProcessorBase* arg_processor = it->second.get();
-            if (arg_processor->IsBool() && tokens[index] != "0" && tokens[index] != "1" &&
-                tokens[index] != "true" && tokens[index] != "false") {
-                arg_processor->Parse("true");
-                arg_name = tokens[index];
-                continue;
-            }
-            arg_processor->Parse(tokens[index]);
-            arg_name.clear();
-            ++index;
+            flag = arg_string.substr(1, separator_index - 1);
+            value = arg_string.substr(separator_index + 1, arg_string.size() - separator_index - 1);
+        }
+        auto last_it_after_removal = std::remove_if(flag.begin(), flag.end(), [](char ch) {return ch == '-';});
+        flag.resize(last_it_after_removal - flag.begin());
+        if (flag == "help") {
+            std::cout << GetInstance().GetHelpString();
+            return false;
+        }
+        auto it = GetInstance().arg_processors.find(flag);
+        if (it == GetInstance().arg_processors.end()) {
+            std::stringstream ss;
+            ss << "Encountered unregistered arg '" << flag << "'. Use --help to list registered args.";
+            throw ExceptionWithBacktrace(ss.str());
+        }
+        ArgProcessorBase* arg_processor = it->second.get();
+        if (value.empty() && arg_processor->IsBool()) {
+            arg_processor->Parse("true");
+        } else {
+            arg_processor->Parse(value);
         }
     }
     for (const auto& arg_and_processor : GetInstance().arg_processors) {
@@ -85,5 +88,6 @@ void ArgParser::SetArgV(int argc, char **argv) {
             throw ExceptionWithBacktrace(ss.str());
         }
     }
+    return true;
 }
 
