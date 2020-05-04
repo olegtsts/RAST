@@ -423,7 +423,7 @@ Blocks contained in the same external memory segment (which allocator asked from
 Finally, the allocation procedure is the following:
 
 \begin{itemize}
-\item calculate integral part $N = int(log(size))$ of the size of the memory consumer asks to allocate
+\item calculate $N = ceil(log(size))$ of the size of the memory consumer asks to allocate. We need to calculate upper bound so that to make sure that the block we fetch from that layer contains at least $N$ bytes.
 \item if the corresponding $N$-th list of blocks is empty, we allocate several external blocks of the sizes $2^{N}$ and build Block structure upon each of them, putting blocks to the $N$-th list
 \item detach first block from the list
 \item split the block into two blocks: first block has exactly needed size, second block consists of what is remained
@@ -936,10 +936,8 @@ Let us introduce class $ExceptionTopKeeper$, which would help to update top of e
 $ExceptionTopKeeper$ contains the following data:
 \begin{itemize}
 	\item variable $path$, which is a path of a file where exceptions are stored
-	\item hashmap $exception\_frequency$ with key being a string of exception and value being equal exception frequency
-	\item hashmap $exception\_last\_time$ with exception as key and its last appearance time as a value
-	\item set $frequency\_exception$ of pairs $(frequency, exception)$ needed in order to maintain sorted order of exceptions by their frequencies
-	\item set $last\_time\_exception$ of pairs $(last\_time, exception)$ needed to maintain sorted order of exceptions by their last appearance time
+	\item ranked map $exception\_frequency$ with key being a string of exception and value being equal exception frequency
+	\item ranked map $exception\_last\_time$ with exception as key and its last appearance time as a value
 	\item $dump\_timer$ of type $WaitingTimer$ (for details see \fullref{subsec:low_overhead_waiting_timer}), which is a timer telling when to $Dump$ exceptions on disk
 	\item $store\_clock$ of a class $PeriodicClock$ (for details see \fullref{subsec:low_overhead_periodic_clock}), which helps to get time of storing exception
 	\item static constant $top\_size$, which is a maximal amount of exceptions with counters stored
@@ -953,7 +951,7 @@ It would have the following methods:
 	\item $Restore$ method, which restores exception data from file
 	\item $Trim$ deletes exceptions stored if amount of different exceptions is more than $top\_size$
 	\item $RemoveOld(current\_time)$ deletes exceptions older than $current\_time - keep\_time$
-	\item $SetPath(new\_path)$ which changes $path$ value to the one user wants
+	\item $SetPath(new\_path)$ which changes $path$ value to the one user wants and tries to read old exception data from it if exists
 	\item $WithCatchingException(callback)$, which calls $callback$ either with or without catching exceptions, which is defined by $debug\_mode$. In case if exception is caught, it is stored in the exception top
 \end{itemize}
 
@@ -961,41 +959,40 @@ $Dump$ has the following algorithm:
 \begin{itemize}
 	\item if $dump\_timer.CheckTime()$ returns $false$, do nothing
 	\item start try block
-	\item convert data of variables $exception\_frequency$, $exception\_last\_time$, $last\_time\_exception$ and $frequency\_exception$ to proto class
+	\item convert data of variables $exception\_frequency$, $exception\_last\_time$ to proto class
 	\item dump proto to a separate file
 	\item move separate file to $path$
 	\item call $dump\_timer.Reset()$
-	\item if any exception caught, ignore them
 \end{itemize}
 
 Replacing file by another moved file is safe even when some other process or thread is reading it.
 
-$Dump$ method absorbs its own exceptions and thus does not throw.
+$Dump$ may throw, no guarantees provided, caller should terminate in case of $Dump$ failure.
 
 $Restore$ has the following algorithm:
 \begin{itemize}
 	\item read proto from $path$ file
-	\item fill inner variables $exception\_frequency$, $exception\_last\_time$, $last\_time\_exception$ and $frequency\_exception$
+	\item fill inner variables $exception\_frequency$, $exception\_last\_time$
 \end{itemize}
 
 $Restore$ may throw, no guarantees provided, caller should terminate in case of $Restore$ failure.
 
 $Trim$ has the following algorithm:
 \begin{itemize}
-	\item while size of $frequency\_exception$ set is larger than $top\_size$, delete the least pair
-	\item also delete it from $exception\_frequency$ and $exception\_last\_time$, $last\_time\_exception$
+	\item while size of $exception\_frequency$ set is larger than $top\_size$, delete the rarest exception. Ranked map supports such an operation.
+	\item delete it from $exception\_last\_time$ as well.
 \end{itemize}
 
 $Trim$ does not throw as far as it calls only erase operations.
 
-$RemoveOld(current\_time)$ has the following also:
+$RemoveOld(current\_time)$ has the following algorithm:
 \begin{itemize}
-	\item if $last\_time\_exception$ is empty, do nothing
+	\item if $exception\_last\_time$ is empty, do nothing
 	\item start an infinite cycle A
-	\item take first element $(last\_time, exception)$ of $last\_time\_exception$
+	\item take exception with oldest time from ranked map $exception\_last\_time$
 	\item if $last\_time$ is more than $current\_time - keep\_time$, return from function
 	\item remove $exception$ from all containers $exception\_frequency$, \\
-		$frequency\_exception$, $exception\_last\_time$ and $last\_time\_exception$
+		$exception\_last\_time$
 \end{itemize}
 
 $RemoveOld$ does not throw, because it calls only erasing functions from set and map.
@@ -1015,28 +1012,15 @@ $WithCatchingException(callback)$ has the following algorithm:
 	\item assert $path$ is not empty string (that is, $SetPath$ has been called before)
 	\item try to catch exceptions while calling $callback$
 	\item store in $exception$ variable a string containing the exception text (if string construction threw, return doing nothing)
-	\item initialize $prev\_count$ with zero
-	\item if $exception$ is found inside $exception\_frequency$ hashmap, assign $prev\_count$ to its frequency
-	\item initialize $prev\_time$ with zero
-	\item if $exception$ is found inside $exception\_last\_time$ hashmap, assign $prev\_time$ to its last appearance time
+	\item if $exception$ is found inside $exception\_frequency$ hashmap, increase frequency by 1. If not found, assign frequency to 1.
 	\item store $current\_time = store\_clock.GetTime()$
-	\item start try block A
-	\item add pair $(prev\_count + 1, exception)$ to $frequency\_exception$
-	\item add pair $(current\_time, exception)$ to $last\_time\_exception$
-	\item replace value of $exception\_frequency[exception]$ with $prev\_count + 1$
-	\item replace value of $exception\_last\_time[exception]$ with $current\_time$
-	\item if an exception is caught in try block A, delete  $(prev\_count + 1, exception)$ pair from $frequency\_exception$, delete $(current\_time, exception)$ pair from $last\_time\_exception$ and return from function doing nothing. This would help to preserve invariants on inner exception.
-	\item if $prev\_count$ is more than zero, remove pair $(prev\_count, exception)$ from \\
-		$frequency\_exception$ set
-	\item if $prev\_time$ is more than zero, remove pair $(prev\_time, exception)$ from \\
-		$last\_time\_exception$ set
+	\item update $exception\_last\_time$ ranked map with value $current\_time$
 	\item call $RemoveOld(current\_time)$
 	\item call $Trim$
 	\item call $Dump$
 \end{itemize}
 
-$AddException$ cannot throw, it absorbs all its own exceptions and in case if any exception handled, $AddException$ may have no effect. Still, that is not a problem for the reason that the functionality of $AddException$ is not so important, thus we do not need to provide strict guarantees. Even if we wanted to provide some guarantees, we would fail for the reason that the function is forced to be noexcept, because it is handling some already happened. Therefore, if other exception arises, we could have gone into infinite recursion handling it the same way.
-
+$WithCatchingException$ cannot throw, it should cause the program to abort in case of any internal exceptions. The logic behind this is that if we failed to handle exception gracefully, we are not trying anymore to gracefully handle that.
 
 \subsection{Shadow-paging thread-wise sharder}
 \label{subsec:shadow_page_thread_wise_sharder}
@@ -2136,7 +2120,7 @@ Here we are to outline classes and methods of $ExceptionTopKeeper$, which is def
 \begin{lstlisting}
 class ExceptionTopKeeper {
 public:
-	void Dump() const noexcept;
+	void Dump();
 
 	void Restore();
 
@@ -2150,15 +2134,13 @@ public:
 	void WithCatchingException(Function func) noexcept;
 private:
 	std::string path;
-	std::unordered_map<std::string, uint64_t> exception_frequency;
-	std::unordered_map<std::string, int64_t> exception_last_time;
-	std::set<std::pair<uint64_t, std::string>> frequency_exception;
-	std::set<std::pair<int64_t, std::string>> last_time_exception;
+	RankedMap<std::string, uint64_t> exception_frequency;
+	RankedMap<std::string, int64_t> exception_last_time;
 	WaitingTimer dump_timer;
 	PeriodicClock store_clock;
 	static const size_t top_size;
 	static const int64_t keep_time;
-	static const debug_mode;
+	static const bool debug_mode;
 }
 \end{lstlisting}
 
