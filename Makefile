@@ -1,4 +1,4 @@
-all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test argparser_test
+all: allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test argparser_test lock_free_allocator_test
 
 allocator_test: allocator.o allocator_test.o
 	g++-9 -o allocator_test allocator_test.o allocator.o -O3 -pedantic -Wall -Werror -mcx16 -latomic
@@ -143,10 +143,10 @@ argparser_test: argparser.o argparser_test.o exception_with_backtrace.o auto_reg
 	g++-9 -o argparser_test argparser.o argparser_test.o exception_with_backtrace.o allocator.o -O3 -pedantic -Wall -Werror -lbacktrace -ldl
 
 lock_free_allocator.o: lock_free_allocator.cpp lock_free_allocator.h packed.lib
-	g++-9 lock_free_allocator.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror
+	g++-9 lock_free_allocator.cpp -g -c -std=c++1z -O3 -pedantic -Wall -Werror -fdiagnostics-color=always
 
 lock_free_allocator_test: lock_free_allocator_test.cpp lock_free_allocator.o
-	g++-9 -o lock_free_allocator_test lock_free_allocator.o -O3 -pedantic -Wall -Werror -lbacktrace -ldl
+	g++-9 -o lock_free_allocator_test lock_free_allocator.o -O3 -pedantic -Wall -Werror -lbacktrace -ldl -fdiagnostics-color=always
 
 clean:
 	rm -f *.o *.gch *.lib *.pb.cc *.pb.h allocator_test allocator_benchmark_1 allocator_benchmark_2 allocator_benchmark_3 allocator_benchmark_4 packed_test queue_test timers_test timers_benchmark_1 timers_benchmark_2 ranked_map_test message_passing_tree_test exception_with_backtrace_test exception_top_proto_storage_test sharder_test file\ 0 file\ 1 core argparser_test lock_free_allocator_test

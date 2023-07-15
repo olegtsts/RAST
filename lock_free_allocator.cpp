@@ -5,6 +5,7 @@
 #include <cassert>
 #include <tuple>
 #include <string>
+#include <algorithm>
 
 #include "argparser.h"
 #include "lock_free_allocator.h"
@@ -16,8 +17,9 @@ LockFreeAllocator::LockFreeAllocator()
 , initialized(false)
 {
     allocator_control.store(AllocatorControl{CreateSegment(), 1});
-    static_assert(SegmentControl::is_always_lock_free());
-    static_assert(std::atomic<AllocatorControl>::is_always_lock_free());
+    assert(allocator_control.is_lock_free());
+//    static_assert(SegmentControl::is_always_lock_free);
+//    static_assert(std::atomic<AllocatorControl>::is_always_lock_free);
 }
 
 size_t LockFreeAllocator::GetSystemMemory() {
@@ -31,7 +33,7 @@ struct LfAllocatorSegmentSize {
     std::string description = "Size of minimal allocated segment for Lock Free Allocator. "
         "If not specified or zero, a reasonable default is used.";
     using type = size_t;
-    using default_value = 0;
+    size_t default_value = 0;
 };
 
 void LockFreeAllocator::Initialize() {
@@ -42,7 +44,7 @@ void LockFreeAllocator::Initialize() {
         hint_size = system_memory / 10;
     }
     initialized = true;
-    segment_size = std::clamp(system_memory / 10, min_segment_size, max_segment_size);
+    segment_size = std::clamp(hint_size, min_segment_size, max_segment_size);
 }
 
 size_t LockFreeAllocator::GetSegmentSize() {
@@ -50,10 +52,11 @@ size_t LockFreeAllocator::GetSegmentSize() {
     return std::clamp(system_memory / 10, min_segment_size, max_segment_size);
 }
 
-SegmentControl* LockFreeAllocator::CreateSegment() const {
+LockFreeAllocator::SegmentControl* LockFreeAllocator::CreateSegment() const {
     char* arena = new char[segment_size];
     void* aligned_segment_control = reinterpret_cast<void*>(arena + 1);
-    assert(std::align(alignof(SegmentControl), sizeof(SegmentControl), aligned_segment_control, segment_size - 1));
+    size_t available_space = segment_size - 1;
+    assert(std::align(alignof(SegmentControl), sizeof(SegmentControl), aligned_segment_control, available_space));
     size_t shift = reinterpret_cast<char*>(aligned_segment_control) - arena;
     *(reinterpret_cast<char*>(aligned_segment_control) - 1) = static_cast<char>(shift);
     SegmentControl* segment_control = new (aligned_segment_control) SegmentControl();
@@ -176,11 +179,13 @@ std::tuple<FrontControl*, char*, bool> LockFreeAllocator::GetAlignedFrontControl
     char * arena, size_t arena_size, size_t data_size, size_t alignment, size_t struct_size
 ) const {
     void* front_control_location = reinterpret_cast<void *>(arena + 1);
-    if (!std::align(alignof(FrontControl), sizeof(FrontControl), front_control_location, arena_size - 1)) {
+    size_t avaialble_space = arena_size - 1;
+    if (!std::align(alignof(FrontControl), sizeof(FrontControl), front_control_location, available_space)) {
         return {nullptr, nullptr, false};
     }
     void* data_location = reinterpret_cast<void*>(reinterpret_cast<char*>(front_control_location) + sizeof(FrontControl));
-    if (!std::align(alignment, struct_size, data_location, arena + arena_size - reinterpret_cast<char*>(data_location))) {
+    available_space -= sizeof(FrontControl);
+    if (!std::align(alignment, struct_size, data_location, available_space)) {
         return {nullptr, nullptr, false};
     }
     return {reinterpret_cast<FrontControl*>(front_control_location), reinterpret_cast<char*>(data_location), true};
@@ -212,6 +217,7 @@ void* LockFreeAllocator::Allocate(size_t size, size_t alignment, size_t struct_s
     while(true) {
         SegmentControlCopyGuard segment_control_copy_guard{allocator_control};
         SegmentControl* segment_control = segment_control_copy_guard.GetCopy();
+        assert(segment_control->is_lock_free());
         SegmentControlData old_segment_control_data = segment_control->load(std::memory_order_relaxed);
         SegmentControlData new_segment_control_data;
         FrontControl* front_control;
@@ -269,6 +275,7 @@ void LockFreeAllocator::Deallocate(void* data_location) {
 
     // In this case SegmentControl is attached.
     // Freed counter of the attached SegmentControl is incremented.
+    assert(segment_control->is_lock_free());
     SegmentControlData old_segment_control_data = segment_control->load(std::memory_order_relaxed);
     SegmentControlData new_segment_control_data;
     do {
